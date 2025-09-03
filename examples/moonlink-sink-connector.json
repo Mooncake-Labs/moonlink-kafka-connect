@@ -1,0 +1,14 @@
+{
+    "name": "moonlink-sink-connector",
+    "config": {
+        "connector.class": "moonlink.sink.connector.MoonlinkSinkConnector",
+        "tasks.max": "1",
+        "topics": "source-1",
+        "moonlink.uri": "http://moonlink:3030",
+        "moonlink.table.name": "test_table_200",
+        "moonlink.database.name": "test_db",
+        "schema.registry.url": "http://schema-registry:8081",
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+        "value.converter": "org.apache.kafka.connect.converters.ByteArrayConverter"
+    }
+}

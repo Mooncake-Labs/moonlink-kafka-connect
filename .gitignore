@@ -1,2 +1,17 @@
 .vscode
 target
+.cursor
+moonlink_data/
+dependency-reduced-pom.xml
+RUN_INSTRUCTIONS.md
+config.json
+build/msk-plugin
+build/*.zip
+.tools
+.mvn_tmp
+client.properties
+*.log
+.connect-plugins
+*.jar
+*.tgz
+build/

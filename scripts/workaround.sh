@@ -8,11 +8,12 @@
 ##  issues found here, and this script will no longer be required.      ##
 ##########################################################################
 
-# Workaround: Remove check for KAFKA_ZOOKEEPER_CONNECT parameter
-sed -i '/KAFKA_ZOOKEEPER_CONNECT/d' /etc/confluent/docker/configure
+# KRaft: Generate/export CLUSTER_ID at runtime if not provided, then format
+if [ -z "$CLUSTER_ID" ]; then
+    CLUSTER_ID="$(kafka-storage random-uuid)"
+    echo "Generated CLUSTER_ID=$CLUSTER_ID"
+fi
+export CLUSTER_ID
 
-# Workaround: Ignore cub zk-ready
-sed -i 's/cub zk-ready/echo ignore zk-ready/' /etc/confluent/docker/ensure
-
-# KRaft required: Format the storage directory with a new cluster ID
-echo "kafka-storage format --ignore-formatted -t $(kafka-storage random-uuid) -c /etc/kafka/kafka.properties" >> /etc/confluent/docker/ensure
+# Format storage if needed (idempotent)
+kafka-storage format --ignore-formatted -t "$CLUSTER_ID" -c /etc/kafka/kafka.properties

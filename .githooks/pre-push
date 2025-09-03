@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v mvn >/dev/null 2>&1; then
+  exit 0
+fi
+
+echo "Checking Java formatting with Spotless..."
+mvn -q -DskipTests=true spotless:check | cat
+
+

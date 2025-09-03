@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v mvn >/dev/null 2>&1; then
+  echo "Maven not found; skipping Java formatting." >&2
+  exit 0
+fi
+
+echo "Running Spotless to format Java..."
+mvn -q spotless:apply | cat
+
+# Re-stage any changes made by the formatter
+git add -A
+
+exit 0
+
+

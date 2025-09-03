@@ -1,0 +1,25 @@
+{
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "workspaceFolder": "/workspaces/moonlink-kafka-connect",
+  "remoteUser": "vscode",
+  "remoteEnv": {
+    "HOME": "/home/vscode"
+  },
+  "postCreateCommand": "bash .devcontainer/postCreateCommand.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "eamodio.gitlens",
+        "vscjava.vscode-java-pack",
+        "rust-lang.rust-analyzer"
+      ]
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "moby": false
+    }
+  }
+}

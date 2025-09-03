@@ -1,0 +1,57 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ControlPlaneDiscoveryForCLI",
+      "Effect": "Allow",
+      "Action": [
+        "kafka:ListClustersV2",
+        "kafka:DescribeClusterV2",
+        "kafka:GetBootstrapBrokers",
+        "kafka:ListClusters",
+        "kafka:DescribeCluster"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ClusterConnect",
+      "Effect": "Allow",
+      "Action": ["kafka-cluster:Connect", "kafka-cluster:DescribeCluster"],
+      "Resource": "<YOUR_CLUSTER_ARN>"
+    },
+    {
+      "Sid": "TopicAdministrationAll",
+      "Effect": "Allow",
+      "Action": [
+        "kafka-cluster:CreateTopic",
+        "kafka-cluster:DescribeTopic",
+        "kafka-cluster:AlterTopic",
+        "kafka-cluster:DeleteTopic"
+      ],
+      "Resource": "<YOUR_CLUSTER_ARN>/*"
+    },
+    {
+      "Sid": "ProduceConsumeAllTopics",
+      "Effect": "Allow",
+      "Action": ["kafka-cluster:ReadData", "kafka-cluster:WriteData"],
+      "Resource": "<YOUR_CLUSTER_ARN>/*"
+    },
+    {
+      "Sid": "ConsumerGroupManagementAll",
+      "Effect": "Allow",
+      "Action": ["kafka-cluster:DescribeGroup", "kafka-cluster:AlterGroup"],
+      "Resource": "<YOUR_CLUSTER_ARN>/*"
+    },
+    {
+      "Sid": "ConnectInternalTopics",
+      "Effect": "Allow",
+      "Action": [
+        "kafka-cluster:CreateTopic",
+        "kafka-cluster:DescribeTopic",
+        "kafka-cluster:ReadData",
+        "kafka-cluster:WriteData"
+      ],
+      "Resource": "<YOUR_CLUSTER_ARN>/__amazon_msk_connect_*"
+    }
+  ]
+}

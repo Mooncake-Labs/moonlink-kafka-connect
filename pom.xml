@@ -5,9 +5,9 @@
 
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>tutorial.buildon.aws.streaming.kafka</groupId>
-    <artifactId>my-first-kafka-connector</artifactId>
-    <description>Building Apache Kafka Connectors</description>
+    <groupId>moonlink</groupId>
+    <artifactId>moonlink-connectors</artifactId>
+    <description>Moonlink Connectors (Load Generator + Sink)</description>
     <version>1.0</version>
 
     <properties>
@@ -15,6 +15,8 @@
         <junit.jupiter.version>5.9.2</junit.jupiter.version>
         <testcontainers.version>1.17.6</testcontainers.version>
         <maven.compiler.plugin>3.10.1</maven.compiler.plugin>
+        <jackson.version>2.17.1</jackson.version>
+        <arrow.version>15.0.2</arrow.version>
     </properties>
 
     <dependencies>
@@ -24,6 +26,42 @@
             <version>${connect.api.version}</version>
             <scope>provided</scope>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>3.3.2</version>
+        </dependency>
+
+        <!-- Apache Arrow for schema serialization/deserialization -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-vector</artifactId>
+            <version>${arrow.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-netty</artifactId>
+            <version>${arrow.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-core</artifactId>
+            <version>${arrow.version}</version>
+        </dependency>
+
+        <!-- JSON serialization/deserialization -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -42,9 +80,32 @@
             <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-connect-avro-converter</artifactId>
+            <version>7.3.3</version>
+        </dependency>
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-avro-serializer</artifactId>
+            <version>7.3.3</version>
+        </dependency>
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-schema-registry-client</artifactId>
+            <version>7.3.3</version>
+        </dependency>
     </dependencies>
 
     <build>
+        <extensions>
+            <extension>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <version>1.7.1</version>
+            </extension>
+        </extensions>
         <resources>
             <resource>
                 <directory>src/main/resources</directory>
@@ -67,7 +128,102 @@
                     <release>11</release>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>2.43.0</version>
+                <configuration>
+                    <java>
+                        <googleJavaFormat>
+                            <version>1.17.0</version>
+                        </googleJavaFormat>
+                        <removeUnusedImports/>
+                    </java>
+                </configuration>
+            </plugin>
+
+            <!-- Build an uber JAR so Kafka Connect can load Arrow classes -->
+            <!-- Build two shaded jars: one with ONLY loadgen classes, one with ONLY sink classes -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <!-- Load Generator Uber Jar -->
+                    <execution>
+                        <id>shade-loadgen</id>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <shadedArtifactAttached>true</shadedArtifactAttached>
+                            <shadedClassifierName>loadgen</shadedClassifierName>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <artifactSet>
+                                <excludes>
+                                    <exclude>org.apache.kafka:connect-api</exclude>
+                                </excludes>
+                            </artifactSet>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                                <filter>
+                                    <artifact>${project.groupId}:${project.artifactId}</artifact>
+                                    <includes>
+                                        <include>example/loadgen/**</include>
+                                    </includes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                    <!-- Sink Uber Jar -->
+                    <execution>
+                        <id>shade-sink</id>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <shadedArtifactAttached>true</shadedArtifactAttached>
+                            <shadedClassifierName>sink</shadedClassifierName>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <artifactSet>
+                                <excludes>
+                                    <exclude>org.apache.kafka:connect-api</exclude>
+                                </excludes>
+                            </artifactSet>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                                <filter>
+                                    <artifact>${project.groupId}:${project.artifactId}</artifact>
+                                    <includes>
+                                        <include>moonlink/sink/connector/**</include>
+                                        <include>moonlink/client/**</include>
+                                    </includes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
         </plugins>
     </build>
 
+    <repositories>
+        <repository>
+            <id>confluent</id>
+            <url>https://packages.confluent.io/maven/</url>
+        </repository>
+    </repositories>
 </project>
