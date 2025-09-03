@@ -1,16 +1,13 @@
-## Building Apache Kafka Connectors
-
-Building connectors for Apache Kafka is hard. Chances are that you just read the previous sentence, and you subconsciously nooded with your head. The reason this happens is that Kafka Connect, which is the runtime platform behind the executing connectors, uses a not so trivial software architecture. There is also a lack of a proper documentation that teaches how the development framework works, how it connects with the runtime, and which best practices you must follow.
-
-For situations like this, your best bet is to get hold of an existing code and try to do the same, hoping your own connector will be written the best way possible. By all means, this is an excellent strategy. But most of the time, it is hard to understand the code, as the connector you took as an example might have more code focused on solving the technical problem that the connector is aiming to solve than only the code part related to building custom connectors.
-
-This is the reason this project exists. This is a minimalistic repository that contains a source connector, whose focus is to show how the development framework from Kafka Connect works. From this repository, you can easily derive your own connector and write only the code that matter for your technical use case. This project also provides you with the resources to build, deploy, test, and debug the code on-premises, as well as deploying it in the cloud.
+## Apache Kafka Connector for Moonlink
+This is the testbed for building a Kafka Connector into [moonlink](https://github.com/Mooncake-Labs/moonlink). This is adapted from AWS' kafka connector demo.
 
 ### Requirements
 
 * [Java 11+](https://openjdk.org/install)
 * [Maven 3.8.6+](https://maven.apache.org/download.cgi)
 * [Docker](https://www.docker.com/get-started)
+
+<!-- for AWS deployment -->
 * [Terraform 1.3.0+](https://www.terraform.io/downloads)
 * [AWS Account](https://aws.amazon.com/resources/create-account)
 * [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
@@ -30,7 +27,7 @@ The first thing you need to do to use this connector is to build it.
 mvn clean package
 ```
 
-💡 A file named `target/my-first-kafka-connector-1.0.jar` will be created. This is your connector for Kafka Connect.
+💡 A file named `target/moonlink-source-connector-1.0.jar` will be created. This is your connector for Kafka Connect.
 
 ## ⬆️ Starting the local environment
 
@@ -43,10 +40,26 @@ With the connector properly built, you need to have a local environment to test 
 2. Start the containers using Docker Compose.
 
 ```bash
+scripts/rebuild-connect.sh
+```
+
+or:
+
+```bash
 docker compose up -d
 ```
 
 Wait until the containers `kafka` and `connect` are started and healthy.
+
+## VScode syntax highlighting
+
+If the IDE is not picking up the protobuf created files, we want to re-compile and ensure that the java extension workspace is refreshed. 
+
+```
+mvn -q -DskipTests=true clean generate-sources && mvn -q -DskipTests=true compile
+```
+
+In vscode / cursor command palette (Cmd shit p): `Java: Clean Java Language Server Workspace` or `Java: Force Java project update`
 
 ## ⏯ Deploying and testing the connector
 
@@ -55,24 +68,45 @@ Nothing is actually happening since the connector hasn't been deployed. Once you
 1. Deploy the connector.
 
 ```bash
-curl -X POST -H "Content-Type:application/json" -d @examples/my-first-kafka-connector.json http://localhost:8083/connectors
+curl -X POST -H "Content-Type:application/json" -d @examples/moonlink-sink-connector.json http://localhost:8083/connectors
+
+curl -X POST -H "Content-Type:application/json" -d @examples/example-source-connector.json http://localhost:8083/connectors
 ```
 
 2. Check if the connector is producing data to Kafka topics.
 
+### Viewing logs:
+docker compose exec kafka bash
+
 ```bash
-kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic source-1 --from-beginning
+kafka-console-consumer --bootstrap-server localhost:9092 --topic source-1 --from-beginning
 ```
 
 ```bash
-kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic source-2 --from-beginning
+kafka-console-consumer --bootstrap-server localhost:9092 --topic source-2 --from-beginning
 ```
 
 ```bash
-kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic source-3 --from-beginning
+kafka-console-consumer --bootstrap-server localhost:9092 --topic source-3 --from-beginning
 ```
 
 💡 All three topics should have sample data continuously generated for them.
+
+You can view the logs using 
+```bash
+docker compose logs -f connect
+
+# Check status
+curl -s http://localhost:8083/connectors/moonlink-sink-connector/status | jq -C . | cat
+
+# Check logs of moonlink sink
+docker compose logs -t --since=30m connect | grep -i "Moonlink Sink Task" | tail -n 200 | cat
+
+# check possible errors
+docker compose logs -t --since=2h connect | grep -i -E "moonlink|Moonlink|moonlink.sink|MoonlinkSink" -C2 | tail -n 200 | cat
+
+curl -sS http://localhost:3030/tables | jq -C .
+```
 
 ## 🪲 Debugging the connector
 
@@ -114,6 +148,8 @@ curl -X DELETE http://localhost:8083/connectors/my-first-kafka-connector
 ```bash
 docker compose down
 ```
+
+# From AWS Demo:
 
 ## 🌩 Deploying into AWS
 

@@ -26,7 +26,7 @@ services:
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
     volumes:
       - ./scripts/workaround.sh:/tmp/workaround.sh
-    command: "bash -c '/tmp/workaround.sh && /etc/confluent/docker/run'"
+    command: "bash -lc 'export CLUSTER_ID=$${CLUSTER_ID:-$$(kafka-storage random-uuid)}; . /tmp/workaround.sh; /etc/confluent/docker/run'"
     healthcheck:
       test: echo srvr | nc kafka 9092 || exit 1
       interval: 5s
@@ -52,7 +52,7 @@ services:
       CONNECT_CONFIG_STORAGE_TOPIC: connect-configs
       CONNECT_OFFSET_STORAGE_TOPIC: connect-offsets
       CONNECT_STATUS_STORAGE_TOPIC: connect-status
-      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "true"
       CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
       CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
       CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.converters.ByteArrayConverter"
@@ -69,3 +69,17 @@ services:
       interval: 5s
       retries: 10
       test: curl --write-out 'HTTP %{http_code}' --fail --silent --output /dev/null http://localhost:8083
+
+  moonlink:
+    build:
+      context: ./moonlink
+      dockerfile: Dockerfile.aarch64
+    container_name: moonlink
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "3030:3030"  # REST API
+    volumes:
+      - ./moonlink-data:/tmp/moonlink
+    command: ["--no-tcp-api", "-p", "3030"]

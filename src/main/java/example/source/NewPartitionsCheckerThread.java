@@ -1,4 +1,4 @@
-package tutorial.buildon.aws.streaming.kafka;
+package example.source;
 
 import java.util.Arrays;
 import java.util.List;

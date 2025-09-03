@@ -5,9 +5,9 @@
 
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>tutorial.buildon.aws.streaming.kafka</groupId>
-    <artifactId>my-first-kafka-connector</artifactId>
-    <description>Building Apache Kafka Connectors</description>
+    <groupId>moonlink</groupId>
+    <artifactId>moonlink-source-connector</artifactId>
+    <description>Moonlink Source Connector</description>
     <version>1.0</version>
 
     <properties>
@@ -15,6 +15,8 @@
         <junit.jupiter.version>5.9.2</junit.jupiter.version>
         <testcontainers.version>1.17.6</testcontainers.version>
         <maven.compiler.plugin>3.10.1</maven.compiler.plugin>
+        <jackson.version>2.17.1</jackson.version>
+        <protobuf.version>3.25.3</protobuf.version>
     </properties>
 
     <dependencies>
@@ -24,6 +26,19 @@
             <version>${connect.api.version}</version>
             <scope>provided</scope>
         </dependency>
+
+        <!-- JSON serialization/deserialization -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -42,9 +57,23 @@
             <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <!-- Protobuf runtime for generated classes -->
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>${protobuf.version}</version>
+        </dependency>
     </dependencies>
 
     <build>
+        <extensions>
+            <extension>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <version>1.7.1</version>
+            </extension>
+        </extensions>
         <resources>
             <resource>
                 <directory>src/main/resources</directory>
@@ -66,6 +95,24 @@
                 <configuration>
                     <release>11</release>
                 </configuration>
+            </plugin>
+
+            <!-- Compile moonlink row protobuf into Java sources -->
+            <plugin>
+                <groupId>org.xolstice.maven.plugins</groupId>
+                <artifactId>protobuf-maven-plugin</artifactId>
+                <version>0.6.1</version>
+                <configuration>
+                    <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
+                    <protoSourceRoot>${project.basedir}/moonlink/src/moonlink_proto/proto</protoSourceRoot>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

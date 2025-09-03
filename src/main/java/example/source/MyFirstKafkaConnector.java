@@ -1,4 +1,6 @@
-package tutorial.buildon.aws.streaming.kafka;
+package example.source;
+
+import static example.source.MyFirstKafkaConnectorConfig.*;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -16,8 +18,6 @@ import org.apache.kafka.connect.connector.Task;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceConnector;
 import org.apache.kafka.connect.util.ConnectorUtils;
-
-import static tutorial.buildon.aws.streaming.kafka.MyFirstKafkaConnectorConfig.*;
 
 public class MyFirstKafkaConnector extends SourceConnector {
 

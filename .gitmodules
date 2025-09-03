@@ -1,0 +1,3 @@
+[submodule "moonlink"]
+	path = moonlink
+	url = git@github.com:Mooncake-Labs/moonlink.git

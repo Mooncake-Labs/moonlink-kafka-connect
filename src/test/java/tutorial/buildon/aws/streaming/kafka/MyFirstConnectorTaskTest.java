@@ -3,14 +3,18 @@ package tutorial.buildon.aws.streaming.kafka;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.junit.Test;
 
+import example.source.MyFirstKafkaConnector;
+import example.source.MyFirstKafkaConnectorTask;
+import example.source.PropertiesUtil;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static example.source.MyFirstKafkaConnectorConfig.*;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static tutorial.buildon.aws.streaming.kafka.MyFirstKafkaConnectorConfig.*;
 
 public class MyFirstConnectorTaskTest {
 

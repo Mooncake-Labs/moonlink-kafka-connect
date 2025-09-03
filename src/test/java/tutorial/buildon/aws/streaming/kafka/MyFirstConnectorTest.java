@@ -7,10 +7,13 @@ import org.apache.kafka.connect.connector.Task;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.junit.jupiter.api.Test;
 
+import example.source.MyFirstKafkaConnector;
+import example.source.MyFirstKafkaConnectorTask;
+import example.source.PropertiesUtil;
+
+import static example.source.MyFirstKafkaConnectorConfig.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-
-import static tutorial.buildon.aws.streaming.kafka.MyFirstKafkaConnectorConfig.*;
 
 public class MyFirstConnectorTest {
 

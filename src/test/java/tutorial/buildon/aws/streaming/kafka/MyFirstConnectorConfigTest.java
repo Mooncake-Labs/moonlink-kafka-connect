@@ -6,9 +6,11 @@ import java.util.Map;
 import org.apache.kafka.common.config.ConfigException;
 import org.junit.jupiter.api.Test;
 
+import example.source.MyFirstKafkaConnectorConfig;
+
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static example.source.MyFirstKafkaConnectorConfig.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static tutorial.buildon.aws.streaming.kafka.MyFirstKafkaConnectorConfig.*;
 
 public class MyFirstConnectorConfigTest {
 

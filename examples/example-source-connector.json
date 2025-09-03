@@ -1,7 +1,7 @@
 {
-    "name": "my-first-kafka-connector",
+    "name": "example-source-connector",
     "config": {
-        "connector.class": "tutorial.buildon.aws.streaming.kafka.MyFirstKafkaConnector",
+        "connector.class": "example.source.MyFirstKafkaConnector",
         "first.required.param": "Kafka",
         "second.required.param": "Connect",
         "tasks.max": "1"
