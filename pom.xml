@@ -17,6 +17,7 @@
         <maven.compiler.plugin>3.10.1</maven.compiler.plugin>
         <jackson.version>2.17.1</jackson.version>
         <protobuf.version>3.25.3</protobuf.version>
+        <arrow.version>15.0.2</arrow.version>
     </properties>
 
     <dependencies>
@@ -25,6 +26,23 @@
             <artifactId>connect-api</artifactId>
             <version>${connect.api.version}</version>
             <scope>provided</scope>
+        </dependency>
+
+        <!-- Apache Arrow for schema serialization/deserialization -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-vector</artifactId>
+            <version>${arrow.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-netty</artifactId>
+            <version>${arrow.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-core</artifactId>
+            <version>${arrow.version}</version>
         </dependency>
 
         <!-- JSON serialization/deserialization -->
@@ -95,6 +113,49 @@
                 <configuration>
                     <release>11</release>
                 </configuration>
+            </plugin>
+
+            <!-- Build an uber JAR so Kafka Connect can load Arrow classes -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>true</createDependencyReducedPom>
+                            <minimizeJar>false</minimizeJar>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <!-- Keep META-INF signatures out of shaded JAR -->
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <relocations>
+                                <!-- Avoid any potential classpath conflicts -->
+                                <relocation>
+                                    <pattern>com.fasterxml.jackson</pattern>
+                                    <shadedPattern>shaded.com.fasterxml.jackson</shadedPattern>
+                                </relocation>
+                            </relocations>
+                            <artifactSet>
+                                <excludes>
+                                    <!-- Do not include Kafka Connect API which is provided by the worker -->
+                                    <exclude>org.apache.kafka:connect-api</exclude>
+                                </excludes>
+                            </artifactSet>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
 
             <!-- Compile moonlink row protobuf into Java sources -->

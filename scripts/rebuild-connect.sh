@@ -17,7 +17,7 @@ echo "Restarting Kafka Connect..."
 docker compose up -d --force-recreate connect moonlink
 
 echo "Waiting for Connect REST API..."
-for i in {1..60}; do
+for i in {1..30}; do
   if curl -fsS http://localhost:8083/ > /dev/null; then
     break
   fi
@@ -33,7 +33,7 @@ fi
 
 echo "Checking if moonlink is running..."
 
-for i in {1..60}; do
+for i in {1..30}; do
   if docker compose exec -T connect bash -lc "curl -sS http://moonlink:3030/health | cat" > /dev/null; then
     echo "Successfully connected to Moonlink"
     break

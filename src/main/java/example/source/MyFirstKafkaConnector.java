@@ -3,6 +3,7 @@ package example.source;
 import static example.source.MyFirstKafkaConnectorConfig.*;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -25,7 +26,7 @@ public class MyFirstKafkaConnector extends SourceConnector {
 
     private Map<String, String> originalProps;
     private MyFirstKafkaConnectorConfig config;
-    private NewPartitionsCheckerThread checker;
+    // private NewPartitionsCheckerThread checker;
 
     @Override
     public String version() {
@@ -80,9 +81,9 @@ public class MyFirstKafkaConnector extends SourceConnector {
     public void start(Map<String, String> originalProps) {
         this.originalProps = originalProps;
         config = new MyFirstKafkaConnectorConfig(originalProps);
-        int monitorThreadTimeout = config.getInt(MONITOR_THREAD_TIMEOUT_CONFIG);
-        checker = new NewPartitionsCheckerThread(context, monitorThreadTimeout);
-        checker.start();
+        // int monitorThreadTimeout = config.getInt(MONITOR_THREAD_TIMEOUT_CONFIG);
+        // checker = new NewPartitionsCheckerThread(context, monitorThreadTimeout);
+        // checker.start();
     }
 
     @Override
@@ -91,7 +92,8 @@ public class MyFirstKafkaConnector extends SourceConnector {
         // The partitions below represent the source's part that
         // would likely to be broken down into tasks... such as
         // tables in a database.
-        List<String> partitions = checker.getCurrentSources();
+        // List<String> partitions = checker.getCurrentSources();
+        List<String> partitions = Arrays.asList("source-1", "source-2", "source-3");
         if (partitions.isEmpty()) {
             taskConfigs = Collections.emptyList();
             log.warn("No tasks created because there is zero to work on");
@@ -109,7 +111,7 @@ public class MyFirstKafkaConnector extends SourceConnector {
 
     @Override
     public void stop() {
-        checker.shutdown();
+        // checker.shutdown();
     }
 
 }

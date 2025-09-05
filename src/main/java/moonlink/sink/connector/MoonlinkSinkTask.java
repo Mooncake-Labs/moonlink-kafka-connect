@@ -13,7 +13,10 @@ import moonlink.client.MoonlinkClient;
 import moonlink.client.Dto;
 
 import org.apache.kafka.connect.errors.DataException;
+import org.apache.kafka.common.protocol.types.Struct;
 import org.apache.kafka.connect.errors.ConnectException;
+import org.apache.arrow.vector.types.pojo.Schema;
+import moonlink.client.MoonlinkRowConverter;
 
 public class MoonlinkSinkTask extends SinkTask {
 
@@ -21,7 +24,12 @@ public class MoonlinkSinkTask extends SinkTask {
 
     private MoonlinkSinkConnectorConfig config;
     private MoonlinkClient client;
-    private List<Dto.FieldSchema> schemaFields;
+    private long sinkStartTimeMs;
+    private long sinkLastLogSecond;
+    private int sinkReceivedThisSecond;
+    private long sinkTotalReceived;
+
+    private Schema arrowSchema;
 
     @Override
     public String version() {
@@ -35,10 +43,21 @@ public class MoonlinkSinkTask extends SinkTask {
         try {
             client = new MoonlinkClient(config.getString(MoonlinkSinkConnectorConfig.MOONLINK_URI));
             // Build converter from configured table schema JSON
-            String schemaJson = config.getString(MoonlinkSinkConnectorConfig.TABLE_SCHEMA_JSON);
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            Dto.FieldSchema[] fields = mapper.readValue(schemaJson, Dto.FieldSchema[].class);
-            schemaFields = java.util.Arrays.asList(fields);
+            // String schemaJson = config.getString(MoonlinkSinkConnectorConfig.TABLE_SCHEMA_JSON);
+            // com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            // Dto.FieldSchema[] fields = mapper.readValue(schemaJson, Dto.FieldSchema[].class);
+            // schemaFields = java.util.Arrays.asList(fields);
+
+            // Deserialize Arrow schema passed from connector as JSON
+            String arrowSchemaJson = props.get("arrow.schema.json");
+            if (arrowSchemaJson == null || arrowSchemaJson.isEmpty()) {
+                throw new ConnectException("Missing 'arrow.schema.json' in task properties");
+            }
+            arrowSchema = Schema.fromJSON(arrowSchemaJson);
+            sinkStartTimeMs = System.currentTimeMillis();
+            sinkLastLogSecond = sinkStartTimeMs / 1000L;
+            sinkReceivedThisSecond = 0;
+            sinkTotalReceived = 0L;
         } catch (Exception e) {
             throw new ConnectException("Failed to initialize Moonlink client", e);
         }
@@ -47,6 +66,10 @@ public class MoonlinkSinkTask extends SinkTask {
     @Override
     public void put(Collection<SinkRecord> records) {
         log.info("Moonlink Sink Task received {} records", records.size());
+        long nowMs = System.currentTimeMillis();
+        sinkReceivedThisSecond += records.size();
+        sinkTotalReceived += records.size();
+        logSinkStatsIfNeeded(nowMs);
         for (SinkRecord record : records) {
             log.info("Processing record: topic={}, partition={}, offset={}", record.topic(), record.kafkaPartition(), record.kafkaOffset());
             try {
@@ -58,13 +81,25 @@ public class MoonlinkSinkTask extends SinkTask {
                     throw new DataException("Record was null");
                 }
 
-                // For now, build a mock MoonlinkRow protobuf matching the configured schema
-                byte[] serializedRow = buildMockMoonlinkRowBytes(schemaFields);
+                // Build MoonlinkRow protobuf from Arrow schema and record value
+                moonlink.Row.MoonlinkRow row = MoonlinkRowConverter.convert(value, arrowSchema).build();
+                byte[] serializedRow = row.toByteArray();
                 var resp = client.insertRowProtobuf(srcTableName, serializedRow);
                 log.info("Inserted row, lsn={}", resp.lsn);
             } catch (Exception e) {
                 throw new DataException("Failed to ingest record", e);
             }
+        }
+    }
+
+    private void logSinkStatsIfNeeded(long nowMs) {
+        long currentSecond = nowMs / 1000L;
+        if (currentSecond > sinkLastLogSecond) {
+            long elapsed = (nowMs - sinkStartTimeMs) / 1000L;
+            log.info("Sink task stats: elapsed={}s, recv_last_second={}, total_received={}",
+                elapsed, sinkReceivedThisSecond, sinkTotalReceived);
+            sinkReceivedThisSecond = 0;
+            sinkLastLogSecond = currentSecond;
         }
     }
 
@@ -77,37 +112,6 @@ public class MoonlinkSinkTask extends SinkTask {
     @Override
     public void stop() {
         log.info("Moonlink Sink Task stopping");
-    }
-
-    private static byte[] buildMockMoonlinkRowBytes(List<Dto.FieldSchema> schemaFields) {
-        moonlink.Row.MoonlinkRow.Builder rowBuilder = moonlink.Row.MoonlinkRow.newBuilder();
-        for (Dto.FieldSchema f : schemaFields) {
-            String dt = f.dataType == null ? "" : f.dataType.toLowerCase();
-            moonlink.Row.RowValue.Builder rv = moonlink.Row.RowValue.newBuilder();
-            if (dt.equals("int32")) {
-                rv.setInt32(1);
-            } else if (dt.equals("int64")) {
-                rv.setInt64(1L);
-            } else if (dt.equals("float32")) {
-                rv.setFloat32(1.0f);
-            } else if (dt.equals("float64")) {
-                rv.setFloat64(1.0d);
-            } else if (dt.equals("boolean") || dt.equals("bool")) {
-                rv.setBool(true);
-            } else if (dt.equals("string") || dt.equals("text")) {
-                rv.setBytes(com.google.protobuf.ByteString.copyFromUtf8("mock"));
-            } else if (dt.equals("date32")) {
-                rv.setInt32(1); // days since epoch
-            } else if (dt.startsWith("decimal(")) {
-                // 16 zero bytes for decimal128 two's complement
-                rv.setDecimal128Be(com.google.protobuf.ByteString.copyFrom(new byte[16]));
-            } else {
-                rv.setNull(moonlink.Row.Null.newBuilder().build());
-            }
-            rowBuilder.addValues(rv.build());
-        }
-        moonlink.Row.MoonlinkRow row = rowBuilder.build();
-        return row.toByteArray();
     }
 }
 

@@ -99,8 +99,16 @@ docker compose logs -f connect
 # Check status
 curl -s http://localhost:8083/connectors/moonlink-sink-connector/status | jq -C . | cat
 
+# Check logs of moonlink source
+docker compose logs -t --since=10m connect | grep -i -E "Source task stats|stopped sending"
+
 # Check logs of moonlink sink
 docker compose logs -t --since=30m connect | grep -i "Moonlink Sink Task" | tail -n 200 | cat
+
+docker compose logs -t --since=10m connect | grep -i "Sink task stats" | tail -n 100 | cat
+
+scripts/run-datafusion.sh
+SELECT COUNT(*) FROM mooncake."test_db"."test_table";
 
 # check possible errors
 docker compose logs -t --since=2h connect | grep -i -E "moonlink|Moonlink|moonlink.sink|MoonlinkSink" -C2 | tail -n 200 | cat

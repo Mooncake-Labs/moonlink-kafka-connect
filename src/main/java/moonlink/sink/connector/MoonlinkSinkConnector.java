@@ -77,6 +77,13 @@ public class MoonlinkSinkConnector extends SinkConnector {
             // TODO: Eventually we should get the schema from moonlink backend instead of just checking for existence.
             init.ensureTableExists(database, table, schema, tableConfig);
             log.info("Ensured Moonlink table exists: {}.{}", database, table);
+
+            // Fetch Arrow schema via IPC (primary) and also fetch JSON to pass via props
+            org.apache.arrow.vector.types.pojo.Schema arrowSchema = client.fetchArrowSchemaIpc(database, table);
+            String arrowSchemaJson = new ObjectMapper().writeValueAsString(arrowSchema);
+            this.originalProps = new HashMap<>(this.originalProps);
+            this.originalProps.put("arrow.schema.json", arrowSchemaJson);
+            log.info("Fetched Arrow schema JSON and stored for tasks");
         } catch (Exception e) {
             throw new ConnectException("Failed to initialize Moonlink table", e);
         }

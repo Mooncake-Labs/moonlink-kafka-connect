@@ -1,6 +1,7 @@
 package moonlink.client;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonSerializer;
@@ -10,11 +11,16 @@ import java.util.Map;
 import java.io.IOException;
 
 public final class Dto {
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static final class FieldSchema {
         public String name;
         @JsonProperty("data_type")
         public String dataType;
         public boolean nullable;
+        // For struct types
+        public List<FieldSchema> fields;
+        // For list/array types
+        public FieldSchema item;
     }
 
     public static final class CreateTableRequest {

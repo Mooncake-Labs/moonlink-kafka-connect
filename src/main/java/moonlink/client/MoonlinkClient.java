@@ -1,14 +1,20 @@
 package moonlink.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 
 import org.apache.kafka.connect.errors.ConnectException;
+
+import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.ipc.ArrowStreamReader;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.io.ByteArrayInputStream;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -87,6 +93,49 @@ public class MoonlinkClient {
         var res = http.send(req, HttpResponse.BodyHandlers.ofString());
         ensure2xx(res);
         return mapper.readValue(res.body(), Dto.IngestResponse.class);
+    }
+
+    public org.apache.arrow.vector.types.pojo.Schema fetchArrowSchema(String database, String table) throws Exception {
+        String uri = baseUrl + "/schema/" + database + "/" + table;
+        var req = HttpRequest.newBuilder(URI.create(uri))
+                .GET()
+                .header("Accept", "application/json")
+                .build();
+        var res = http.send(req, HttpResponse.BodyHandlers.ofString());
+        ensure2xx(res);
+        JsonNode root = mapper.readTree(res.body());
+        JsonNode schemaNode = root.get("schema");
+        if (schemaNode == null || schemaNode.isNull()) {
+            throw new ConnectException("Moonlink fetch schema returned no 'schema' field");
+        }
+
+        System.out.println("Schema: " + schemaNode.toString());
+        return org.apache.arrow.vector.types.pojo.Schema.fromJSON(schemaNode.toString());
+    }
+
+    public org.apache.arrow.vector.types.pojo.Schema fetchArrowSchemaIpc(String database, String table) throws Exception {
+        String uri = baseUrl + "/schema/" + database + "/" + table;
+        var req = HttpRequest.newBuilder(URI.create(uri))
+                .GET()
+                .header("Accept", "application/json")
+                .build();
+        var res = http.send(req, HttpResponse.BodyHandlers.ofString());
+        ensure2xx(res);
+        JsonNode root = mapper.readTree(res.body());
+        JsonNode schemaNode = root.get("serialized_schema");
+        if (schemaNode == null || !schemaNode.isArray()) {
+            throw new ConnectException("Moonlink fetch schema returned no 'serialized_schema' array");
+        }
+        byte[] bytes = new byte[schemaNode.size()];
+        for (int i = 0; i < schemaNode.size(); i++) {
+            bytes[i] = (byte) (schemaNode.get(i).asInt() & 0xFF);
+        }
+        try (ArrowStreamReader reader = new ArrowStreamReader(new ByteArrayInputStream(bytes), new RootAllocator())) {
+            VectorSchemaRoot rootSchema = reader.getVectorSchemaRoot();
+            return rootSchema.getSchema();
+        } catch (Exception e) {
+            throw new ConnectException("Failed to parse Arrow IPC schema: " + e.getMessage(), e);
+        }
     }
 
     private static void ensure2xx(HttpResponse<?> res) {

@@ -4,6 +4,10 @@
         "connector.class": "example.source.MyFirstKafkaConnector",
         "first.required.param": "Kafka",
         "second.required.param": "Connect",
-        "tasks.max": "1"
+        "tasks.max": "1",
+        "task.messages.per.second": "60",
+        "message.size.bytes": "200",
+        "task.max.duration.seconds": "10",
+        "output.topic": "source-1"
     }
 }
