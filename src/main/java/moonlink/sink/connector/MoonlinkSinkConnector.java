@@ -16,11 +16,8 @@ import org.apache.kafka.connect.sink.SinkConnector;
 import static moonlink.sink.connector.MoonlinkSinkConnectorConfig.*;
 
 import moonlink.client.MoonlinkClient;
-import moonlink.client.MoonlinkInitializer;
-import moonlink.client.Dto;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.core.type.TypeReference;
 
 public class MoonlinkSinkConnector extends SinkConnector {
 
@@ -54,29 +51,7 @@ public class MoonlinkSinkConnector extends SinkConnector {
             String baseUrl = cfg.getString(MOONLINK_URI);
             String database = cfg.getString(DATABASE_NAME);
             String table = cfg.getString(TABLE_NAME);
-            String schemaJson = cfg.getString(TABLE_SCHEMA_JSON);
-
-            // Parse schema JSON -> List<FieldSchema>
-            // TODO: Eventually we should get the schema from moonlink backend instead of passing it in here.
-            List<Dto.FieldSchema> schema = new ObjectMapper().readValue(
-                schemaJson,
-                new TypeReference<List<Dto.FieldSchema>>() {}
-            );
-
-            // Table config: specify required mooncake settings
-            Map<String, Object> tableConfig = new HashMap<>();
-            Map<String, Object> mooncakeConfig = new HashMap<>();
-            mooncakeConfig.put("append_only", true);
-            mooncakeConfig.put("row_identity", "None");
-            mooncakeConfig.put("skip_index_merge", false);
-            mooncakeConfig.put("skip_data_compaction", false);
-            tableConfig.put("mooncake", mooncakeConfig);
-
             var client = new MoonlinkClient(baseUrl);
-            var init = new MoonlinkInitializer(client);
-            // TODO: Eventually we should get the schema from moonlink backend instead of just checking for existence.
-            init.ensureTableExists(database, table, schema, tableConfig);
-            log.info("Ensured Moonlink table exists: {}.{}", database, table);
 
             // Fetch Arrow schema via IPC (primary) and also fetch JSON to pass via props
             org.apache.arrow.vector.types.pojo.Schema arrowSchema = client.fetchArrowSchemaIpc(database, table);
@@ -85,7 +60,7 @@ public class MoonlinkSinkConnector extends SinkConnector {
             this.originalProps.put("arrow.schema.json", arrowSchemaJson);
             log.info("Fetched Arrow schema JSON and stored for tasks");
         } catch (Exception e) {
-            throw new ConnectException("Failed to initialize Moonlink table", e);
+            throw new ConnectException("Failed to fetch Moonlink table schema. Ensure the table exists in Moonlink before starting the sink connector.", e);
         }
     }
 
