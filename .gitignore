@@ -3,3 +3,5 @@ target
 .cursor
 moonlink-data
 dependency-reduced-pom.xml
+RUN_INSTRUCTIONS.md
+profile-config.json

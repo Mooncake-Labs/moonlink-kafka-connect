@@ -1,0 +1,41 @@
+{
+  "remote": {
+    "moonlink_uri": "http://ec2-<ip-address>.compute-1.amazonaws.com:3030"
+  },
+  "source": {
+    "connector_name": "example-source-connector",
+    "tasks_max": 1,
+    "messages_per_second": 10,
+    "message_size_bytes": 200,
+    "max_duration_seconds": 60,
+    "output_topic": "source-1"
+  },
+  "sink": {
+    "connector_name": "moonlink-sink-connector",
+    "tasks_max": 1
+  },
+  "table": {
+    "database": "test_db",
+    "name": "test_table_15",
+    "schema": [
+      { "name": "string-column", "data_type": "string", "nullable": false },
+      { "name": "numeric-column", "data_type": "int32",  "nullable": false },
+      { "name": "boolean-column", "data_type": "boolean", "nullable": true }
+    ],
+    "storage": {
+      "s3": {
+        "bucket": "testing-kafka-local",
+        "region": "us-east-1",
+        "access_key_id": "your_key",
+        "secret_access_key": "your_secret",
+        "endpoint": null
+      }
+    }
+  },
+  "profiling": {
+    "csv_path": "lsn_snapshot_latency.csv",
+    "log_path": "profiling_prints.log"
+  }
+}
+
+

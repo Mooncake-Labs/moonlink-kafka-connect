@@ -37,6 +37,7 @@ public class MyFirstKafkaConnectorTask extends SourceTask {
     private int eventsSentThisSecond;
     private long totalEventsSent;
     private int maxDurationSeconds; // 0 or negative = unlimited
+    private long maxMessagesToSend; // 0 = unlimited; computed as messagesPerSecond * maxDurationSeconds
     private boolean stopLogged;
     // Single-source load generator; Kafka Connect uses this map to track offsets
     private static final java.util.Map<String, String> SOURCE_PARTITION = java.util.Collections.singletonMap("source", "source-1");
@@ -66,6 +67,11 @@ public class MyFirstKafkaConnectorTask extends SourceTask {
         eventsSentThisSecond = 0;
         totalEventsSent = 0L;
         maxDurationSeconds = config.getInt(TASK_MAX_DURATION_SECONDS_CONFIG);
+        if (maxDurationSeconds > 0 && messagesPerSecond > 0) {
+            maxMessagesToSend = (long) messagesPerSecond * (long) maxDurationSeconds;
+        } else {
+            maxMessagesToSend = 0L; // unlimited
+        }
         stopLogged = false;
         // Single-source mode: ignore any provided sources list
         outputTopic = config.getString(OUTPUT_TOPIC_CONFIG);
@@ -79,17 +85,16 @@ public class MyFirstKafkaConnectorTask extends SourceTask {
     @Override
     public List<SourceRecord> poll() throws InterruptedException {
         long nowMs = System.currentTimeMillis();
-        // Check duration cap
-        if (maxDurationSeconds > 0) {
-            long elapsedTotalSeconds = (nowMs - startTimeMs) / 1000L;
-            if (elapsedTotalSeconds >= maxDurationSeconds) {
-                if (!stopLogged) {
-                    log.info("Source task finished: elapsed={}s, total_sent={}, stopped sending", elapsedTotalSeconds, totalEventsSent);
-                    stopLogged = true;
-                }
-                Thread.sleep(250); // yield
-                return Collections.emptyList();
+        // Check message-count cap (exact total = messagesPerSecond * maxDurationSeconds)
+        if (maxMessagesToSend > 0 && totalEventsSent >= maxMessagesToSend) {
+            if (!stopLogged) {
+                long elapsedTotalSeconds = (nowMs - startTimeMs) / 1000L;
+                log.info("Source task finished: elapsed={}s, target_messages={}, total_sent={}, stopped sending",
+                    elapsedTotalSeconds, maxMessagesToSend, totalEventsSent);
+                stopLogged = true;
             }
+            Thread.sleep(250); // yield
+            return Collections.emptyList();
         }
 
         double elapsedSeconds = (nowMs - lastRefillTimeMs) / 1000.0;
@@ -99,6 +104,15 @@ public class MyFirstKafkaConnectorTask extends SourceTask {
         }
 
         int toSend = (int) Math.floor(availableTokens);
+        // Do not exceed the remaining allowed messages when capped
+        if (maxMessagesToSend > 0) {
+            long remaining = maxMessagesToSend - totalEventsSent;
+            if (remaining <= 0) {
+                toSend = 0;
+            } else if (toSend > remaining) {
+                toSend = (int) Math.min(remaining, Integer.MAX_VALUE);
+            }
+        }
         if (toSend <= 0) {
             Thread.sleep(Math.max(1, 1000 / Math.max(1, messagesPerSecond)));
             return Collections.emptyList();

@@ -83,7 +83,7 @@ public class MoonlinkClient {
         Dto.IngestProtobufRequest body = new Dto.IngestProtobufRequest();
         body.operation = "insert";
         body.data = serializedRowProto; // custom serializer writes as JSON array
-        body.requestMode = Dto.RequestMode.Sync; // wait for lsn
+        body.requestMode = Dto.RequestMode.Async; // wait for lsn
         String json = mapper.writeValueAsString(body);
         var req = HttpRequest.newBuilder(URI.create(baseUrl + "/ingestpb/" + srcTableName))
                 .POST(HttpRequest.BodyPublishers.ofString(json))
