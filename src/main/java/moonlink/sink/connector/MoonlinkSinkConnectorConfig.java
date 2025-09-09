@@ -21,9 +21,9 @@ public class MoonlinkSinkConnectorConfig extends AbstractConfig {
 
     public static final String DATABASE_NAME = "moonlink.database.name";
     private static final String DATABASE_NAME_DOC = "This is the Moonlink database name";
-    
-    public static final String TABLE_SCHEMA_JSON = "moonlink.json.schema";
-    private static final String TABLE_SCHEMA_JSON_DOC = "This is the Moonlink JSON schema";
+
+    public static final String SCHEMA_REGISTRY_URL = "schema.registry.url";
+    private static final String SCHEMA_REGISTRY_URL_DOC = "Schema Registry base URL (e.g. http://schema-registry:8081)";
 
     public static final ConfigDef CONFIG_DEF = createConfigDef();
 
@@ -50,9 +50,9 @@ public class MoonlinkSinkConnectorConfig extends AbstractConfig {
             Importance.HIGH,
             DATABASE_NAME_DOC)
         .define(
-            TABLE_SCHEMA_JSON,
+            SCHEMA_REGISTRY_URL,
             Type.STRING,
             Importance.HIGH,
-            TABLE_SCHEMA_JSON_DOC);
+            SCHEMA_REGISTRY_URL_DOC);
     }
 }

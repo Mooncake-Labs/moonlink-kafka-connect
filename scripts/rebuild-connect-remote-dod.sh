@@ -77,10 +77,19 @@ PROFILING_CSV_PATH="${PROFILING_CSV_PATH:-lsn_snapshot_latency.csv}"
 PROFILING_LOG_PATH="${PROFILING_LOG_PATH:-profiling_prints.log}"
 
 echo "Building connector jar..."
+mkdir -p .mvn_tmp || true
+export MAVEN_OPTS="${MAVEN_OPTS:-} -Djava.io.tmpdir=$(pwd)/.mvn_tmp"
 mvn -q -DskipTests package
 
-echo "Stopping any existing Compose stack..."
-docker compose down -v || true
+# Sanitize plugin JARs: strip any signature files that can trip Connect's verifier
+echo "Sanitizing plugin JARs (stripping META-INF signatures)..."
+find target -maxdepth 1 -type f -name "*.jar" ! -name "original-*" -print | while read -r J; do
+  zip -q -d "$J" "META-INF/*.SF" "META-INF/*.DSA" "META-INF/*.RSA" 2>/dev/null || true
+done
+
+echo "Stopping any existing Compose services (keeping schema-registry up)..."
+docker compose stop kafka connect moonlink || true
+docker compose rm -f -v kafka connect moonlink || true
 
 if [[ "${LOCAL_MOONLINK}" == "true" ]]; then
   echo "Starting local Kafka+Connect+Moonlink..."
@@ -137,6 +146,7 @@ if [[ -n "${CONNECT_CID}" ]]; then
   docker compose exec -T connect bash -lc "mkdir -p /usr/share/java/my-first-kafka-connector" || true
   # Copy locally built JARs into the running container (bind mounts may not work in DoD)
   for J in target/*.jar; do
+    case "$(basename "$J")" in original-*) continue;; esac
     if [[ -f "$J" ]]; then
       echo "Copying $J to container...";
       docker cp "$J" "${CONNECT_CID}:/usr/share/java/my-first-kafka-connector/" || true
@@ -291,7 +301,11 @@ SOURCE_PAYLOAD=$(jq -n \
     "task.messages.per.second": $mps,
     "message.size.bytes": $size,
     "task.max.duration.seconds": $dur,
-    "output.topic": $topic
+    "output.topic": $topic,
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter.schema.registry.url": "http://schema-registry:8081"
   }}')
 echo "SOURCE connector payload:"; echo "${SOURCE_PAYLOAD}" | (command -v jq >/dev/null 2>&1 && jq -C . || cat)
 echo "${SOURCE_PAYLOAD}" | curl -sS -X POST -H "Content-Type:application/json" -d @- "${CONNECT_BASE}/connectors" -w "\nHTTP_STATUS:%{http_code}\n" | cat
@@ -305,6 +319,7 @@ SINK_PAYLOAD=$(jq -n \
   --arg db "${ML_DATABASE}" \
   --arg tbl "${ML_TABLE}" \
   --arg schema "${ML_SCHEMA_JSON}" \
+  --arg sr "http://schema-registry:8081" \
   '{name: $name, config: {
     "connector.class": "moonlink.sink.connector.MoonlinkSinkConnector",
     "tasks.max": $tasks,
@@ -312,7 +327,9 @@ SINK_PAYLOAD=$(jq -n \
     "moonlink.uri": $uri,
     "moonlink.table.name": $tbl,
     "moonlink.database.name": $db,
-    "moonlink.json.schema": $schema
+    "schema.registry.url": $sr,
+    "key.converter": "org.apache.kafka.connect.converters.ByteArrayConverter",
+    "value.converter": "org.apache.kafka.connect.converters.ByteArrayConverter"
   }}')
 echo "SINK connector payload:"; echo "${SINK_PAYLOAD}" | (command -v jq >/dev/null 2>&1 && jq -C . || cat)
 echo "${SINK_PAYLOAD}" | curl -sS -X POST -H "Content-Type:application/json" -d @- "${CONNECT_BASE}/connectors" -w "\nHTTP_STATUS:%{http_code}\n" | cat
@@ -360,8 +377,9 @@ if [[ "${src_ok}" != "true" || "${snk_ok}" != "true" ]]; then
   echo "Sink task traces:" >&2
   echo "${SNK_STATUS}" | jq -r '.tasks[] | select(.state!="RUNNING") | .trace // empty' 2>/dev/null >&2 || true
 
-  # bring the docker down
-  docker down -v kafka connect
+  # bring selected services down (keep schema-registry)
+  docker compose stop kafka connect moonlink || true
+  docker compose rm -f -v kafka connect moonlink || true
   exit 1
 
 
@@ -374,200 +392,201 @@ echo "Start complete."
 # LSN-based profiling with synchronous snapshot latency
 # ==========================
 
-if [[ "${SOURCE_MAX_DURATION}" =~ ^[0-9]+$ && "${SOURCE_MAX_DURATION}" -gt 0 ]]; then
-  TARGET_MESSAGES=$(( SOURCE_MSGS_PER_SEC * SOURCE_MAX_DURATION ))
-  echo "Profiling (LSN-based) enabled: target_messages=${TARGET_MESSAGES}" 
+# if [[ "${SOURCE_MAX_DURATION}" =~ ^[0-9]+$ && "${SOURCE_MAX_DURATION}" -gt 0 ]]; then
+#   TARGET_MESSAGES=$(( SOURCE_MSGS_PER_SEC * SOURCE_MAX_DURATION ))
+#   echo "Profiling (LSN-based) enabled: target_messages=${TARGET_MESSAGES}" 
 
-  # Helpers
-  plog() {
-    # Print to console and append to profiler log file
-    echo "$1"
-    if [[ -n "${PROFILING_LOG_PATH}" ]]; then echo "$1" >> "${PROFILING_LOG_PATH}"; fi
-  }
-  get_latest_lsn_and_publish_ms() {
-    # Find the latest line carrying an LSN and parse both LSN and the docker ISO timestamp (publish time)
-    local line
-    line=$(docker compose logs -t --since=90s connect 2>/dev/null | \
-      grep -E 'Inserted row, lsn=|Sink poll completed:' | tail -n 1)
-    local lsn token
-    token=$(echo "${line}" | grep -Eo 'lsn=[0-9]+|last_lsn=[0-9]+' | tail -n 1)
-    lsn=$(echo "${token}" | sed -E 's/^[a-z_]+=//')
-    # Parse the docker-compose ISO8601 timestamp prefix (e.g., 2025-09-07T00:39:44.868793584Z)
-    local iso
-    iso=$(echo "${line}" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z' | head -n 1)
-    local publish_ms
-    if [[ -n "${iso}" ]]; then
-      publish_ms=$(date -d "${iso}" +%s%3N 2>/dev/null || echo "")
-    else
-      publish_ms=""
-    fi
-    echo "${lsn},${publish_ms}"
-  }
+#   # Helpers
+#   plog() {
+#     # Print to console and append to profiler log file
+#     echo "$1"
+#     if [[ -n "${PROFILING_LOG_PATH}" ]]; then echo "$1" >> "${PROFILING_LOG_PATH}"; fi
+#   }
+#   get_latest_lsn_and_publish_ms() {
+#     # Find the latest line carrying an LSN and parse both LSN and the docker ISO timestamp (publish time)
+#     local line
+#     line=$(docker compose logs -t --since=90s connect 2>/dev/null | \
+#       grep -E 'Inserted row, lsn=|Sink poll completed:' | tail -n 1)
+#     local lsn token
+#     token=$(echo "${line}" | grep -Eo 'lsn=[0-9]+|last_lsn=[0-9]+' | tail -n 1)
+#     lsn=$(echo "${token}" | sed -E 's/^[a-z_]+=//')
+#     # Parse the docker-compose ISO8601 timestamp prefix (e.g., 2025-09-07T00:39:44.868793584Z)
+#     local iso
+#     iso=$(echo "${line}" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z' | head -n 1)
+#     local publish_ms
+#     if [[ -n "${iso}" ]]; then
+#       publish_ms=$(date -d "${iso}" +%s%3N 2>/dev/null || echo "")
+#     else
+#       publish_ms=""
+#     fi
+#     echo "${lsn},${publish_ms}"
+#   }
 
-  saw_source_finished=false
-  final_lsn=0
-  start_ms=$(date +%s%3N)
-  last_check_ms=${start_ms}
-  SAMPLE_INTERVAL_SEC=5
+#   saw_source_finished=false
+#   final_lsn=0
+#   start_ms=$(date +%s%3N)
+#   last_check_ms=${start_ms}
+#   SAMPLE_INTERVAL_SEC=5
 
-  echo "snapshot_end_ms,lsn,publish_ms,snapshot_total_latency_ms,snapshot_request_delay_ms,snapshot_http_ms" > "${PROFILING_CSV_PATH}"
+#   echo "snapshot_end_ms,lsn,publish_ms,snapshot_total_latency_ms,snapshot_request_delay_ms,snapshot_http_ms" > "${PROFILING_CSV_PATH}"
 
-  target_reached=false
-  last_known_lsn=0
-  while true; do
-    loop_start_ms=$(date +%s%3N)
+#   target_reached=false
+#   last_known_lsn=0
+#   while true; do
+#     loop_start_ms=$(date +%s%3N)
 
-    # Check if source reported finished; cache latest observed lsn
-    latest_source_line=$(docker compose logs -t --since=90s connect 2>/dev/null | grep -E 'Source task finished:' | tail -n 1 || true)
-    if [[ -n "${latest_source_line}" && "${saw_source_finished}" = false ]]; then
-      cur_lsn=$(get_latest_lsn_and_publish_ms | cut -d',' -f1)
-      cur_lsn=${cur_lsn:-0}
-      plog "Detected source finish: ${latest_source_line} (latest_lsn=${cur_lsn})"
-      saw_source_finished=true
-      final_lsn=${cur_lsn}
-    fi
+#     # Check if source reported finished; cache latest observed lsn
+#     latest_source_line=$(docker compose logs -t --since=90s connect 2>/dev/null | grep -E 'Source task finished:' | tail -n 1 || true)
+#     if [[ -n "${latest_source_line}" && "${saw_source_finished}" = false ]]; then
+#       cur_lsn=$(get_latest_lsn_and_publish_ms | cut -d',' -f1)
+#       cur_lsn=${cur_lsn:-0}
+#       plog "Detected source finish: ${latest_source_line} (latest_lsn=${cur_lsn})"
+#       saw_source_finished=true
+#       final_lsn=${cur_lsn}
+#     fi
 
-    # Per-5s live report: aggregate latest per-task batch logs
-    batch_lines=$(docker compose logs -t --since=90s connect 2>/dev/null | grep -E 'Sink task batch:' || true)
-    task_ids=$(echo "${batch_lines}" | sed -n 's/.*task_id=\([^ ]*\).*/\1/p' | sort -u)
-    total_completed_sum=0
-    max_last_lsn=0
-    report_lines=""
-    total_processed_in_latest=0
-    total_tasks_count=0
-    for tid in ${task_ids}; do
-      line=$(echo "${batch_lines}" | grep -E "task_id=${tid} " | tail -n 1)
-      processed_batch=$(echo "${line}" | sed -n 's/.* processed=\([0-9]\+\).*/\1/p')
-      tc=$(echo "${line}" | sed -n 's/.* total_completed=\([0-9]\+\).*/\1/p')
-      rps=$(echo "${line}" | sed -n 's/.* rps=\([0-9.\-]\+\).*/\1/p')
-      elapsed_ms=$(echo "${line}" | sed -n 's/.* elapsed_ms=\([0-9]\+\).*/\1/p')
-      http_ms_batch=$(echo "${line}" | sed -n 's/.* http_ms_batch=\([0-9.]\+\).*/\1/p')
-      ser_ms_batch=$(echo "${line}" | sed -n 's/.* serialize_ms_batch=\([0-9.]\+\).*/\1/p')
-      last_lsn_task=$(echo "${line}" | sed -n 's/.* last_lsn=\([0-9]\+\).*/\1/p')
-      total_completed_sum=$(( total_completed_sum + ${tc:-0} ))
-      total_processed_in_latest=$(( total_processed_in_latest + ${processed_batch:-0} ))
-      total_tasks_count=$(( total_tasks_count + 1 ))
-      if [[ -n "${last_lsn_task}" && ${last_lsn_task} -gt ${max_last_lsn} ]]; then max_last_lsn=${last_lsn_task}; fi
-      report_lines+=$(printf "  task=%s processed=%s total_completed=%s rps=%s elapsed_ms=%s http_ms_batch=%s serialize_ms_batch=%s last_lsn=%s\n" "${tid}" "${processed_batch:-0}" "${tc:-0}" "${rps:-0}" "${elapsed_ms:-0}" "${http_ms_batch:-0}" "${ser_ms_batch:-0}" "${last_lsn_task:-0}")
-    done
-    percent=$(awk -v cur="${total_completed_sum}" -v tot="${TARGET_MESSAGES}" 'BEGIN{ if(tot>0) printf "%.2f", (cur*100.0)/tot; else print 0 }')
-    if [[ ${total_tasks_count} -gt 0 ]]; then avg_batch_size=$(awk -v p=${total_processed_in_latest} -v t=${total_tasks_count} 'BEGIN{ printf "%.2f", (t>0?p/t:0) }'); else avg_batch_size=0; fi
-    plog ""
-    plog "Live report: total_completed=${total_completed_sum}/${TARGET_MESSAGES} (${percent}%) max_last_lsn=${max_last_lsn} avg_batch_size=${avg_batch_size}"
-    printf "%s" "${report_lines}"
+#     # Per-5s live report: aggregate latest per-task batch logs
+#     batch_lines=$(docker compose logs -t --since=90s connect 2>/dev/null | grep -E 'Sink task batch:' || true)
+#     task_ids=$(echo "${batch_lines}" | sed -n 's/.*task_id=\([^ ]*\).*/\1/p' | sort -u)
+#     total_completed_sum=0
+#     max_last_lsn=0
+#     report_lines=""
+#     total_processed_in_latest=0
+#     total_tasks_count=0
+#     for tid in ${task_ids}; do
+#       line=$(echo "${batch_lines}" | grep -E "task_id=${tid} " | tail -n 1)
+#       processed_batch=$(echo "${line}" | sed -n 's/.* processed=\([0-9]\+\).*/\1/p')
+#       tc=$(echo "${line}" | sed -n 's/.* total_completed=\([0-9]\+\).*/\1/p')
+#       rps=$(echo "${line}" | sed -n 's/.* rps=\([0-9.\-]\+\).*/\1/p')
+#       elapsed_ms=$(echo "${line}" | sed -n 's/.* elapsed_ms=\([0-9]\+\).*/\1/p')
+#       http_ms_batch=$(echo "${line}" | sed -n 's/.* http_ms_batch=\([0-9.]\+\).*/\1/p')
+#       ser_ms_batch=$(echo "${line}" | sed -n 's/.* serialize_ms_batch=\([0-9.]\+\).*/\1/p')
+#       last_lsn_task=$(echo "${line}" | sed -n 's/.* last_lsn=\([0-9]\+\).*/\1/p')
+#       total_completed_sum=$(( total_completed_sum + ${tc:-0} ))
+#       total_processed_in_latest=$(( total_processed_in_latest + ${processed_batch:-0} ))
+#       total_tasks_count=$(( total_tasks_count + 1 ))
+#       if [[ -n "${last_lsn_task}" && ${last_lsn_task} -gt ${max_last_lsn} ]]; then max_last_lsn=${last_lsn_task}; fi
+#       report_lines+=$(printf "  task=%s processed=%s total_completed=%s rps=%s elapsed_ms=%s http_ms_batch=%s serialize_ms_batch=%s last_lsn=%s\n" "${tid}" "${processed_batch:-0}" "${tc:-0}" "${rps:-0}" "${elapsed_ms:-0}" "${http_ms_batch:-0}" "${ser_ms_batch:-0}" "${last_lsn_task:-0}")
+#     done
+#     percent=$(awk -v cur="${total_completed_sum}" -v tot="${TARGET_MESSAGES}" 'BEGIN{ if(tot>0) printf "%.2f", (cur*100.0)/tot; else print 0 }')
+#     if [[ ${total_tasks_count} -gt 0 ]]; then avg_batch_size=$(awk -v p=${total_processed_in_latest} -v t=${total_tasks_count} 'BEGIN{ printf "%.2f", (t>0?p/t:0) }'); else avg_batch_size=0; fi
+#     plog ""
+#     plog "Live report: total_completed=${total_completed_sum}/${TARGET_MESSAGES} (${percent}%) max_last_lsn=${max_last_lsn} avg_batch_size=${avg_batch_size}"
+#     printf "%s" "${report_lines}"
 
-    if [[ ${total_completed_sum} -ge ${TARGET_MESSAGES} ]]; then
-      final_lsn=${max_last_lsn}
-      plog "All expected messages ingested. final_lsn=${final_lsn}."
-      break
-    fi
+#     if [[ ${total_completed_sum} -ge ${TARGET_MESSAGES} ]]; then
+#       final_lsn=${max_last_lsn}
+#       plog "All expected messages ingested. final_lsn=${final_lsn}."
+#       break
+#     fi
 
-    # Sleep to align to a 5-second cadence using wall-clock
-    next_due_ms=$(( last_check_ms + (SAMPLE_INTERVAL_SEC * 1000) ))
-    now_ms=$(date +%s%3N)
-    sleep_ms=$(( next_due_ms - now_ms ))
-    if [[ ${sleep_ms} -gt 0 ]]; then
-      sleep $(awk -v ms=${sleep_ms} 'BEGIN { printf "%.3f", ms/1000 }')
-    fi
-    last_check_ms=$(date +%s%3N)
-  done
+#     # Sleep to align to a 5-second cadence using wall-clock
+#     next_due_ms=$(( last_check_ms + (SAMPLE_INTERVAL_SEC * 1000) ))
+#     now_ms=$(date +%s%3N)
+#     sleep_ms=$(( next_due_ms - now_ms ))
+#     if [[ ${sleep_ms} -gt 0 ]]; then
+#       sleep $(awk -v ms=${sleep_ms} 'BEGIN { printf "%.3f", ms/1000 }')
+#     fi
+#     last_check_ms=$(date +%s%3N)
+#   done
 
-  end_ms=$(date +%s%3N)
-  total_s=$(awk -v start=${start_ms} -v end=${end_ms} 'BEGIN { printf "%.3f", (end-start)/1000 }')
-  # Derive sink-side averages from logs over the run window
-  run_window_s=$(( ( (end_ms - start_ms) / 1000 ) + 5 ))
-  if [[ ${run_window_s} -lt 30 ]]; then run_window_s=30; fi
-  sink_lines=$(docker compose logs -t --since=${run_window_s}s connect 2>/dev/null | grep -E 'Sink poll completed:' || true)
-  sink_avg_http_ms=$(echo "${sink_lines}" | grep -Eo 'avg_http_ms=[0-9.]+' | sed 's/.*=//' | awk '{sum+=$1; n++} END{ if(n>0) printf "%.2f", sum/n; else print 0}')
-  sink_avg_ser_ms=$(echo "${sink_lines}" | grep -Eo 'avg_serialize_ms=[0-9.]+' | sed 's/.*=//' | awk '{sum+=$1; n++} END{ if(n>0) printf "%.2f", sum/n; else print 0}')
-  # Aggregate client-side JSON vs SEND timing from logs
-  http_timing_lines=$(docker compose logs -t --since=${run_window_s}s connect 2>/dev/null | grep -E 'HTTP timings: op=insertpb' || true)
-  sink_avg_thr_rps=$(echo "${sink_lines}" | grep -Eo 'throughput_rps=[0-9.]+' | sed 's/.*=//' | awk '{sum+=$1; n++} END{ if(n>0) printf "%.2f", sum/n; else print 0}')
-  sink_avg_avg_thr_rps=$(echo "${sink_lines}" | grep -Eo 'avg_throughput_rps=[0-9.]+' | sed 's/.*=//' | awk '{sum+=$1; n++} END{ if(n>0) printf "%.2f", sum/n; else print 0}')
-  # Final cumulative throughput (rows/s) based on total wall time
-  final_cum_rps=$(awk -v n="${TARGET_MESSAGES}" -v s="${total_s}" 'BEGIN{ if(s>0) printf "%.2f", n/s; else print 0 }')
-  final_cum_mb_s=$(awk -v r="${final_cum_rps}" -v b="${SOURCE_MSG_SIZE_BYTES}" 'BEGIN{ printf "%.3f", (r*b)/1000000 }')
-  sink_total_completed=$(echo "${sink_lines}" | tail -n 1 | sed -n 's/.*total_completed=\([0-9]\+\).*/\1/p')
-  sink_avg_mb_s=$(awk -v rps="${sink_avg_thr_rps}" -v b="${SOURCE_MSG_SIZE_BYTES}" 'BEGIN { printf "%.3f", (rps*b)/1000000 }')
-  backlog_msgs=""
-  if [[ -n "${sink_total_completed}" ]]; then
-    backlog_msgs=$(( TARGET_MESSAGES - sink_total_completed ))
-    if [[ ${backlog_msgs} -lt 0 ]]; then backlog_msgs=0; fi
-  fi
-  plog ""
-  plog "================ Profiling Context ================="
-  msg_size_mb=$(awk -v b="${SOURCE_MSG_SIZE_BYTES}" 'BEGIN{ printf "%.3f", b/1000000 }')
-  expected_total_msgs=${TARGET_MESSAGES}
-  total_data_mb=$(awk -v n="${TARGET_MESSAGES}" -v b="${SOURCE_MSG_SIZE_BYTES}" 'BEGIN{ printf "%.3f", (n*b)/1000000 }')
-  total_data_gb=$(awk -v n="${TARGET_MESSAGES}" -v b="${SOURCE_MSG_SIZE_BYTES}" 'BEGIN{ printf "%.3f", (n*b)/1000000000 }')
-  expected_mbps=$(awk -v m="${SOURCE_MSGS_PER_SEC}" -v b="${SOURCE_MSG_SIZE_BYTES}" 'BEGIN{ printf "%.3f", (m*b)/1000000 }')
-  start_human=$(date -d @$((${start_ms}/1000)) +"%Y-%m-%d %H:%M:%S")
-  end_human=$(date -d @$((${end_ms}/1000)) +"%Y-%m-%d %H:%M:%S")
-  plog "Moonlink URI: ${SINK_MOONLINK_URI}"
-  plog "Table: ${SRC_TABLE_NAME}  Topic: ${SOURCE_TOPIC}"
-  plog "Source tasks: ${SOURCE_TASKS_MAX}  Sink tasks: ${SINK_TASKS_MAX}"
-  plog "Configured MPS: ${SOURCE_MSGS_PER_SEC}  Message size: ${SOURCE_MSG_SIZE_BYTES} bytes (~${msg_size_mb} MB)  Max duration: ${SOURCE_MAX_DURATION}s"
-  plog "Expected total messages: ${expected_total_msgs}  Expected data: ~${total_data_mb} MB (~${total_data_gb} GB)"
-  plog "Expected data rate: ~${expected_mbps} MB/s"
-  plog "Sample interval: ${SAMPLE_INTERVAL_SEC}s  Start: ${start_human}  End: ${end_human}"
-  plog "=================================================="
-  plog "================ LSN Profiling Summary ================"
-  plog "Final observed LSN: ${final_lsn}"
-  plog "Total wall time: ${total_s}s"
-  # End-of-ingestion per-task completion times
-  batch_lines_all=$(docker compose logs -t --since=${run_window_s}s connect 2>/dev/null | grep -E 'Sink task batch:' || true)
-  task_ids=$(echo "${batch_lines_all}" | sed -n 's/.*task_id=\([^ ]*\).*/\1/p' | sort -u)
-  total_batches_processed=0
-  total_batches_count=0
-  for tid in ${task_ids}; do
-    last_line=$(echo "${batch_lines_all}" | grep -E "task_id=${tid} " | tail -n 1)
-    iso=$(echo "${last_line}" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z' | head -n 1)
-    done_ms=""
-    if [[ -n "${iso}" ]]; then done_ms=$(date -d "${iso}" +%s%3N 2>/dev/null || echo ""); fi
-    if [[ -n "${done_ms}" ]]; then dur_ms=$(( done_ms - start_ms )); else dur_ms=""; fi
-    tc=$(echo "${last_line}" | sed -n 's/.* total_completed=\([0-9]\+\).*/\1/p')
-    plog "Task ${tid} finished: total_completed=${tc} duration_ms=${dur_ms}"
-    # accumulate batch sizes
-    sizes_for_task=$(echo "${batch_lines_all}" | grep -E "task_id=${tid} " | sed -n 's/.* processed=\([0-9]\+\).*/\1/p')
-    for s in ${sizes_for_task}; do total_batches_processed=$(( total_batches_processed + s )); total_batches_count=$(( total_batches_count + 1 )); done
-  done
-  if [[ ${total_batches_count} -gt 0 ]]; then final_avg_batch=$(awk -v p=${total_batches_processed} -v n=${total_batches_count} 'BEGIN{ printf "%.2f", (n>0?p/n:0) }'); else final_avg_batch=0; fi
-  plog "Average batch size (overall): ${final_avg_batch}"
-  if command -v awk >/dev/null 2>&1; then
-    avg_latency=$(awk -F',' 'NR>1 {sum+=$4; n++} END { if(n>0) printf("%.2f", sum/n); else print 0 }' "${PROFILING_CSV_PATH}")
-    avg_req_lag=$(awk -F',' 'NR>1 {sum+=$5; n++} END { if(n>0) printf("%.2f", sum/n); else print 0 }' "${PROFILING_CSV_PATH}")
-    plog "Average snapshot latency: ${avg_latency} ms"
-    plog "Average request lag: ${avg_req_lag} ms"
-  fi
-  plog "Sink avg HTTP roundtrip: ${sink_avg_http_ms} ms  avg serialize: ${sink_avg_ser_ms} ms"
-  plog "Sink instantaneous avg throughput: ${sink_avg_thr_rps} rows/s (~${sink_avg_mb_s} MB/s)"
-  plog "Final cumulative throughput: ${final_cum_rps} rows/s (~${final_cum_mb_s} MB/s)"
-  # Final snapshot once: measure from highest LSN publish to snapshot complete
-  lsn_publish=$(get_latest_lsn_and_publish_ms)
-  lsn=$(echo "${lsn_publish}" | cut -d',' -f1)
-  publish_ms=$(echo "${lsn_publish}" | cut -d',' -f2)
-  if [[ -z "${lsn}" || "${lsn}" == "" ]]; then lsn=${final_lsn}; fi
-  snap_req_start_ms=$(date +%s%3N)
-  SNAP_PAYLOAD=$(jq -n --arg db "${ML_DATABASE}" --arg tbl "${ML_TABLE}" --argjson lsn ${lsn} '{database:$db, table:$tbl, lsn:$lsn}')
-  curl -sS -X POST "${REST_BASE_HOST}/tables/${SRC_TABLE_NAME}/snapshot" -H "content-type: application/json" -d "${SNAP_PAYLOAD}" > /dev/null || true
-  snap_req_end_ms=$(date +%s%3N)
-  if [[ -z "${publish_ms}" ]]; then publish_ms=${snap_req_start_ms}; fi
-  snapshot_total_latency_ms=$(( snap_req_end_ms - publish_ms ))
-  snapshot_request_delay_ms=$(( snap_req_start_ms - publish_ms ))
-  snapshot_http_ms=$(( snap_req_end_ms - snap_req_start_ms ))
-  echo "${snap_req_end_ms},${lsn},${publish_ms},${snapshot_total_latency_ms},${snapshot_request_delay_ms},${snapshot_http_ms}" >> "${PROFILING_CSV_PATH}"
-  plog "Final snapshot: lsn=${lsn} total_latency_ms=${snapshot_total_latency_ms} request_delay_ms=${snapshot_request_delay_ms} http_ms=${snapshot_http_ms}"
-  plog "======================================================"
-  # Auto-stop after profiling (concise output)
-  DROP_PAYLOAD=$(jq -n --arg db "${ML_DATABASE}" --arg tbl "${ML_TABLE}" '{database:$db, table:$tbl}')
-  DROP_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE "${REST_BASE_HOST}/tables/${SRC_TABLE_NAME}" -H "content-type: application/json" -d "${DROP_PAYLOAD}" || true)
-  SRC_DEL=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE "${CONNECT_BASE}/connectors/${SOURCE_NAME}" || true)
-  SNK_DEL=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE "${CONNECT_BASE}/connectors/${SINK_NAME}" || true)
-  if docker compose down -v >/dev/null 2>&1; then DC_STATUS="OK"; else DC_STATUS="FAIL"; fi
-  plog "Stopped (table_drop=${DROP_STATUS}, delete_src=${SRC_DEL}, delete_sink=${SNK_DEL}, compose=${DC_STATUS})."
-else
-  echo "Profiling disabled: SOURCE_MAX_DURATION is not a positive integer (${SOURCE_MAX_DURATION})."
-fi
+#   end_ms=$(date +%s%3N)
+#   total_s=$(awk -v start=${start_ms} -v end=${end_ms} 'BEGIN { printf "%.3f", (end-start)/1000 }')
+#   # Derive sink-side averages from logs over the run window
+#   run_window_s=$(( ( (end_ms - start_ms) / 1000 ) + 5 ))
+#   if [[ ${run_window_s} -lt 30 ]]; then run_window_s=30; fi
+#   sink_lines=$(docker compose logs -t --since=${run_window_s}s connect 2>/dev/null | grep -E 'Sink poll completed:' || true)
+#   sink_avg_http_ms=$(echo "${sink_lines}" | grep -Eo 'avg_http_ms=[0-9.]+' | sed 's/.*=//' | awk '{sum+=$1; n++} END{ if(n>0) printf "%.2f", sum/n; else print 0}')
+#   sink_avg_ser_ms=$(echo "${sink_lines}" | grep -Eo 'avg_serialize_ms=[0-9.]+' | sed 's/.*=//' | awk '{sum+=$1; n++} END{ if(n>0) printf "%.2f", sum/n; else print 0}')
+#   # Aggregate client-side JSON vs SEND timing from logs
+#   http_timing_lines=$(docker compose logs -t --since=${run_window_s}s connect 2>/dev/null | grep -E 'HTTP timings: op=insertpb' || true)
+#   sink_avg_thr_rps=$(echo "${sink_lines}" | grep -Eo 'throughput_rps=[0-9.]+' | sed 's/.*=//' | awk '{sum+=$1; n++} END{ if(n>0) printf "%.2f", sum/n; else print 0}')
+#   sink_avg_avg_thr_rps=$(echo "${sink_lines}" | grep -Eo 'avg_throughput_rps=[0-9.]+' | sed 's/.*=//' | awk '{sum+=$1; n++} END{ if(n>0) printf "%.2f", sum/n; else print 0}')
+#   # Final cumulative throughput (rows/s) based on total wall time
+#   final_cum_rps=$(awk -v n="${TARGET_MESSAGES}" -v s="${total_s}" 'BEGIN{ if(s>0) printf "%.2f", n/s; else print 0 }')
+#   final_cum_mb_s=$(awk -v r="${final_cum_rps}" -v b="${SOURCE_MSG_SIZE_BYTES}" 'BEGIN{ printf "%.3f", (r*b)/1000000 }')
+#   sink_total_completed=$(echo "${sink_lines}" | tail -n 1 | sed -n 's/.*total_completed=\([0-9]\+\).*/\1/p')
+#   sink_avg_mb_s=$(awk -v rps="${sink_avg_thr_rps}" -v b="${SOURCE_MSG_SIZE_BYTES}" 'BEGIN { printf "%.3f", (rps*b)/1000000 }')
+#   backlog_msgs=""
+#   if [[ -n "${sink_total_completed}" ]]; then
+#     backlog_msgs=$(( TARGET_MESSAGES - sink_total_completed ))
+#     if [[ ${backlog_msgs} -lt 0 ]]; then backlog_msgs=0; fi
+#   fi
+#   plog ""
+#   plog "================ Profiling Context ================="
+#   msg_size_mb=$(awk -v b="${SOURCE_MSG_SIZE_BYTES}" 'BEGIN{ printf "%.3f", b/1000000 }')
+#   expected_total_msgs=${TARGET_MESSAGES}
+#   total_data_mb=$(awk -v n="${TARGET_MESSAGES}" -v b="${SOURCE_MSG_SIZE_BYTES}" 'BEGIN{ printf "%.3f", (n*b)/1000000 }')
+#   total_data_gb=$(awk -v n="${TARGET_MESSAGES}" -v b="${SOURCE_MSG_SIZE_BYTES}" 'BEGIN{ printf "%.3f", (n*b)/1000000000 }')
+#   expected_mbps=$(awk -v m="${SOURCE_MSGS_PER_SEC}" -v b="${SOURCE_MSG_SIZE_BYTES}" 'BEGIN{ printf "%.3f", (m*b)/1000000 }')
+#   start_human=$(date -d @$((${start_ms}/1000)) +"%Y-%m-%d %H:%M:%S")
+#   end_human=$(date -d @$((${end_ms}/1000)) +"%Y-%m-%d %H:%M:%S")
+#   plog "Moonlink URI: ${SINK_MOONLINK_URI}"
+#   plog "Table: ${SRC_TABLE_NAME}  Topic: ${SOURCE_TOPIC}"
+#   plog "Source tasks: ${SOURCE_TASKS_MAX}  Sink tasks: ${SINK_TASKS_MAX}"
+#   plog "Configured MPS: ${SOURCE_MSGS_PER_SEC}  Message size: ${SOURCE_MSG_SIZE_BYTES} bytes (~${msg_size_mb} MB)  Max duration: ${SOURCE_MAX_DURATION}s"
+#   plog "Expected total messages: ${expected_total_msgs}  Expected data: ~${total_data_mb} MB (~${total_data_gb} GB)"
+#   plog "Expected data rate: ~${expected_mbps} MB/s"
+#   plog "Sample interval: ${SAMPLE_INTERVAL_SEC}s  Start: ${start_human}  End: ${end_human}"
+#   plog "=================================================="
+#   plog "================ LSN Profiling Summary ================"
+#   plog "Final observed LSN: ${final_lsn}"
+#   plog "Total wall time: ${total_s}s"
+#   # End-of-ingestion per-task completion times
+#   batch_lines_all=$(docker compose logs -t --since=${run_window_s}s connect 2>/dev/null | grep -E 'Sink task batch:' || true)
+#   task_ids=$(echo "${batch_lines_all}" | sed -n 's/.*task_id=\([^ ]*\).*/\1/p' | sort -u)
+#   total_batches_processed=0
+#   total_batches_count=0
+#   for tid in ${task_ids}; do
+#     last_line=$(echo "${batch_lines_all}" | grep -E "task_id=${tid} " | tail -n 1)
+#     iso=$(echo "${last_line}" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z' | head -n 1)
+#     done_ms=""
+#     if [[ -n "${iso}" ]]; then done_ms=$(date -d "${iso}" +%s%3N 2>/dev/null || echo ""); fi
+#     if [[ -n "${done_ms}" ]]; then dur_ms=$(( done_ms - start_ms )); else dur_ms=""; fi
+#     tc=$(echo "${last_line}" | sed -n 's/.* total_completed=\([0-9]\+\).*/\1/p')
+#     plog "Task ${tid} finished: total_completed=${tc} duration_ms=${dur_ms}"
+#     # accumulate batch sizes
+#     sizes_for_task=$(echo "${batch_lines_all}" | grep -E "task_id=${tid} " | sed -n 's/.* processed=\([0-9]\+\).*/\1/p')
+#     for s in ${sizes_for_task}; do total_batches_processed=$(( total_batches_processed + s )); total_batches_count=$(( total_batches_count + 1 )); done
+#   done
+#   if [[ ${total_batches_count} -gt 0 ]]; then final_avg_batch=$(awk -v p=${total_batches_processed} -v n=${total_batches_count} 'BEGIN{ printf "%.2f", (n>0?p/n:0) }'); else final_avg_batch=0; fi
+#   plog "Average batch size (overall): ${final_avg_batch}"
+#   if command -v awk >/dev/null 2>&1; then
+#     avg_latency=$(awk -F',' 'NR>1 {sum+=$4; n++} END { if(n>0) printf("%.2f", sum/n); else print 0 }' "${PROFILING_CSV_PATH}")
+#     avg_req_lag=$(awk -F',' 'NR>1 {sum+=$5; n++} END { if(n>0) printf("%.2f", sum/n); else print 0 }' "${PROFILING_CSV_PATH}")
+#     plog "Average snapshot latency: ${avg_latency} ms"
+#     plog "Average request lag: ${avg_req_lag} ms"
+#   fi
+#   plog "Sink avg HTTP roundtrip: ${sink_avg_http_ms} ms  avg serialize: ${sink_avg_ser_ms} ms"
+#   plog "Sink instantaneous avg throughput: ${sink_avg_thr_rps} rows/s (~${sink_avg_mb_s} MB/s)"
+#   plog "Final cumulative throughput: ${final_cum_rps} rows/s (~${final_cum_mb_s} MB/s)"
+#   # Final snapshot once: measure from highest LSN publish to snapshot complete
+#   lsn_publish=$(get_latest_lsn_and_publish_ms)
+#   lsn=$(echo "${lsn_publish}" | cut -d',' -f1)
+#   publish_ms=$(echo "${lsn_publish}" | cut -d',' -f2)
+#   if [[ -z "${lsn}" || "${lsn}" == "" ]]; then lsn=${final_lsn}; fi
+#   snap_req_start_ms=$(date +%s%3N)
+#   SNAP_PAYLOAD=$(jq -n --arg db "${ML_DATABASE}" --arg tbl "${ML_TABLE}" --argjson lsn ${lsn} '{database:$db, table:$tbl, lsn:$lsn}')
+#   curl -sS -X POST "${REST_BASE_HOST}/tables/${SRC_TABLE_NAME}/snapshot" -H "content-type: application/json" -d "${SNAP_PAYLOAD}" > /dev/null || true
+#   snap_req_end_ms=$(date +%s%3N)
+#   if [[ -z "${publish_ms}" ]]; then publish_ms=${snap_req_start_ms}; fi
+#   snapshot_total_latency_ms=$(( snap_req_end_ms - publish_ms ))
+#   snapshot_request_delay_ms=$(( snap_req_start_ms - publish_ms ))
+#   snapshot_http_ms=$(( snap_req_end_ms - snap_req_start_ms ))
+#   echo "${snap_req_end_ms},${lsn},${publish_ms},${snapshot_total_latency_ms},${snapshot_request_delay_ms},${snapshot_http_ms}" >> "${PROFILING_CSV_PATH}"
+#   plog "Final snapshot: lsn=${lsn} total_latency_ms=${snapshot_total_latency_ms} request_delay_ms=${snapshot_request_delay_ms} http_ms=${snapshot_http_ms}"
+#   plog "======================================================"
+#   # Auto-stop after profiling (concise output)
+#   DROP_PAYLOAD=$(jq -n --arg db "${ML_DATABASE}" --arg tbl "${ML_TABLE}" '{database:$db, table:$tbl}')
+#   DROP_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE "${REST_BASE_HOST}/tables/${SRC_TABLE_NAME}" -H "content-type: application/json" -d "${DROP_PAYLOAD}" || true)
+#   SRC_DEL=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE "${CONNECT_BASE}/connectors/${SOURCE_NAME}" || true)
+#   SNK_DEL=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE "${CONNECT_BASE}/connectors/${SINK_NAME}" || true)
+#   if docker compose down -v >/dev/null 2>&1; then DC_STATUS="OK"; else DC_STATUS="FAIL"; fi
+#   plog "Stopped (table_drop=${DROP_STATUS}, delete_src=${SRC_DEL}, delete_sink=${SNK_DEL}, compose=${DC_STATUS})."
+# else
+#   echo "Profiling disabled: SOURCE_MAX_DURATION is not a positive integer (${SOURCE_MAX_DURATION})."
+# fi
 
 
 
+echo "Rebuild complete. Skipping snapshot profiling in Avro mode."

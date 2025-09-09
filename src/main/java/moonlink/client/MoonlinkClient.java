@@ -96,7 +96,19 @@ public class MoonlinkClient {
         return mapper.readValue(res.body(), Dto.IngestResponse.class);
     }
 
-    // New: raw Protobuf ingestion without JSON wrapper
+    // Raw Avro ingestion for Kafka payloads (Confluent wire format). Server assumes insert + async.
+    public Dto.IngestResponse insertRowAvroRaw(String srcTableName, byte[] avroBytes) throws Exception {
+        var req = HttpRequest.newBuilder(URI.create(baseUrl + "/kafka/" + srcTableName + "/ingest"))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(avroBytes))
+                .header("Content-Type", "application/octet-stream")
+                .header("Accept", "application/json")
+                .build();
+        var res = http.send(req, HttpResponse.BodyHandlers.ofString());
+        ensure2xx(res);
+        return mapper.readValue(res.body(), Dto.IngestResponse.class);
+    }
+
+    // Raw Protobuf ingestion without JSON wrapper (legacy utility; server path may differ)
     public Dto.IngestResponse insertRowProtobufRaw(String srcTableName, byte[] serializedRowProto) throws Exception {
         var req = HttpRequest.newBuilder(URI.create(baseUrl + "/ingestpb_raw/" + srcTableName))
                 .POST(HttpRequest.BodyPublishers.ofByteArray(serializedRowProto))

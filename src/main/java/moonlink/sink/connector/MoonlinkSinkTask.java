@@ -12,8 +12,9 @@ import moonlink.client.MoonlinkClient;
 
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.errors.ConnectException;
-import org.apache.arrow.vector.types.pojo.Schema;
-import moonlink.client.MoonlinkRowConverter;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
 
 public class MoonlinkSinkTask extends SinkTask {
 
@@ -32,7 +33,7 @@ public class MoonlinkSinkTask extends SinkTask {
     private long serializeCount;
     private String taskId;
 
-    private Schema arrowSchema;
+    private String schemaRegistryUrl;
 
     @Override
     public String version() {
@@ -45,18 +46,7 @@ public class MoonlinkSinkTask extends SinkTask {
         log.info("Moonlink Sink Task starting with props: {}", props);
         try {
             client = new MoonlinkClient(config.getString(MoonlinkSinkConnectorConfig.MOONLINK_URI));
-            // Build converter from configured table schema JSON
-            // String schemaJson = config.getString(MoonlinkSinkConnectorConfig.TABLE_SCHEMA_JSON);
-            // com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            // Dto.FieldSchema[] fields = mapper.readValue(schemaJson, Dto.FieldSchema[].class);
-            // schemaFields = java.util.Arrays.asList(fields);
-
-            // Deserialize Arrow schema passed from connector as JSON
-            String arrowSchemaJson = props.get("arrow.schema.json");
-            if (arrowSchemaJson == null || arrowSchemaJson.isEmpty()) {
-                throw new ConnectException("Missing 'arrow.schema.json' in task properties");
-            }
-            arrowSchema = Schema.fromJSON(arrowSchemaJson);
+            schemaRegistryUrl = config.getString(MoonlinkSinkConnectorConfig.SCHEMA_REGISTRY_URL);
             sinkStartTimeMs = System.currentTimeMillis();
             sinkLastLogSecond = sinkStartTimeMs / 1000L;
             sinkCompletedThisSecond = 0;
@@ -91,19 +81,32 @@ public class MoonlinkSinkTask extends SinkTask {
                 if (value == null) {
                     throw new DataException("Record was null");
                 }
+                if (!(value instanceof byte[])) {
+                    throw new DataException("Expected byte[] value with ByteArrayConverter");
+                }
+                byte[] bytes = (byte[]) value;
 
-                // Build MoonlinkRow protobuf from Arrow schema and record value
-                long serializeStartNs = System.nanoTime();
-                moonlink.Row.MoonlinkRow row = MoonlinkRowConverter.convert(value, arrowSchema).build();
-                byte[] serializedRow = row.toByteArray();
-                long serializeElapsedNs = (System.nanoTime() - serializeStartNs);
-                serializeTimeTotalNs += serializeElapsedNs;
-                batchSerializeNsTotal += serializeElapsedNs;
-                serializeCount++;
+                // Validate Confluent Avro magic byte (0) and extract schema id (big-endian int)
+                if (bytes.length < 5 || bytes[0] != 0) {
+                    throw new DataException("Invalid Confluent Avro payload: missing magic byte or too short");
+                }
+                int schemaId = ByteBuffer.wrap(bytes, 1, 4).order(ByteOrder.BIG_ENDIAN).getInt();
+
+                // Try to fetch schema from Schema Registry to validate connectivity
+                boolean schemaFound = false;
+                try {
+                    java.net.http.HttpClient http = java.net.http.HttpClient.newHttpClient();
+                    String url = schemaRegistryUrl + "/schemas/ids/" + schemaId;
+                    java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).GET().build();
+                    java.net.http.HttpResponse<String> res = http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+                    schemaFound = res.statusCode() == 200;
+                } catch (Exception ex) {
+                    schemaFound = false;
+                }
+                log.info("Schema id {} found in registry: {}", schemaId, schemaFound ? "yes" : "no");
 
                 long httpStartNs = System.nanoTime();
-                // Use JSON-wrapped protobuf endpoint supported by service (/ingestpb)
-                var resp = client.insertRowProtobuf(srcTableName, serializedRow);
+                var resp = client.insertRowAvroRaw(srcTableName, bytes);
                 long httpElapsedNs = (System.nanoTime() - httpStartNs);
                 httpCallTimeTotalNs += httpElapsedNs;
                 batchHttpNsTotal += httpElapsedNs;

@@ -1,6 +1,6 @@
-package example.source;
+package example.loadgen;
 
-import static example.source.MyFirstKafkaConnectorConfig.*;
+import static example.loadgen.LoadGeneratorConnectorConfig.*;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -17,18 +17,18 @@ import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
+import example.source.PropertiesUtil;
 
-@Deprecated
-public class MyFirstKafkaConnectorTask extends SourceTask {
+public class LoadGeneratorTask extends SourceTask {
 
     private static final String STRING_COLUMN = "string_column";
     private static final String NUMERIC_COLUMN = "numeric_column";
     private static final String BOOLEAN_COLUMN = "boolean_column";
 
     private final Random random = new Random(System.currentTimeMillis());
-    private final Logger log = LoggerFactory.getLogger(MyFirstKafkaConnectorTask.class);
+    private final Logger log = LoggerFactory.getLogger(LoadGeneratorTask.class);
 
-    private MyFirstKafkaConnectorConfig config;
+    private LoadGeneratorConnectorConfig config;
     private int messagesPerSecond;
     private int messageSizeBytes;
     private double availableTokens;
@@ -40,7 +40,6 @@ public class MyFirstKafkaConnectorTask extends SourceTask {
     private int maxDurationSeconds; // 0 or negative = unlimited
     private long maxMessagesToSend; // 0 = unlimited; computed as messagesPerSecond * maxDurationSeconds
     private boolean stopLogged;
-    // Single-source load generator; Kafka Connect uses this map to track offsets
     private static final java.util.Map<String, String> SOURCE_PARTITION = java.util.Collections.singletonMap("source", "source-1");
     private String outputTopic;
     private Schema recordSchema;
@@ -52,15 +51,11 @@ public class MyFirstKafkaConnectorTask extends SourceTask {
 
     @Override
     public void start(Map<String, String> properties) {
-        config = new MyFirstKafkaConnectorConfig(properties);
+        config = new LoadGeneratorConnectorConfig(properties);
         messagesPerSecond = config.getInt(TASK_MESSAGES_PER_SECOND_CONFIG);
-        if (messagesPerSecond <= 0) {
-            messagesPerSecond = 1;
-        }
+        if (messagesPerSecond <= 0) messagesPerSecond = 1;
         messageSizeBytes = config.getInt(MESSAGE_SIZE_BYTES_CONFIG);
-        if (messageSizeBytes <= 0) {
-            messageSizeBytes = 1;
-        }
+        if (messageSizeBytes <= 0) messageSizeBytes = 1;
         availableTokens = 0.0;
         startTimeMs = System.currentTimeMillis();
         lastRefillTimeMs = startTimeMs;
@@ -74,7 +69,6 @@ public class MyFirstKafkaConnectorTask extends SourceTask {
             maxMessagesToSend = 0L; // unlimited
         }
         stopLogged = false;
-        // Single-source mode: ignore any provided sources list
         outputTopic = config.getString(OUTPUT_TOPIC_CONFIG);
         recordSchema = SchemaBuilder.struct()
             .field(STRING_COLUMN, Schema.STRING_SCHEMA).required()
@@ -86,15 +80,14 @@ public class MyFirstKafkaConnectorTask extends SourceTask {
     @Override
     public List<SourceRecord> poll() throws InterruptedException {
         long nowMs = System.currentTimeMillis();
-        // Check message-count cap (exact total = messagesPerSecond * maxDurationSeconds)
         if (maxMessagesToSend > 0 && totalEventsSent >= maxMessagesToSend) {
             if (!stopLogged) {
                 long elapsedTotalSeconds = (nowMs - startTimeMs) / 1000L;
-                log.info("Source task finished: elapsed={}s, target_messages={}, total_sent={}, stopped sending",
+                log.info("Load generator finished: elapsed={}s, target_messages={}, total_sent={}, stopped",
                     elapsedTotalSeconds, maxMessagesToSend, totalEventsSent);
                 stopLogged = true;
             }
-            Thread.sleep(250); // yield
+            Thread.sleep(250);
             return Collections.emptyList();
         }
 
@@ -105,7 +98,6 @@ public class MyFirstKafkaConnectorTask extends SourceTask {
         }
 
         int toSend = (int) Math.floor(availableTokens);
-        // Do not exceed the remaining allowed messages when capped
         if (maxMessagesToSend > 0) {
             long remaining = maxMessagesToSend - totalEventsSent;
             if (remaining <= 0) {
@@ -121,7 +113,7 @@ public class MyFirstKafkaConnectorTask extends SourceTask {
 
         List<SourceRecord> records = new ArrayList<>();
         for (int i = 0; i < toSend; i++) {
-            long nextOffset = totalEventsSent + 1; // monotonic offset for Connect bookkeeping
+            long nextOffset = totalEventsSent + 1;
             records.add(new SourceRecord(
                 SOURCE_PARTITION,
                 java.util.Collections.singletonMap("offset", nextOffset),
@@ -132,11 +124,10 @@ public class MyFirstKafkaConnectorTask extends SourceTask {
         }
         availableTokens -= toSend;
 
-        // per-second logging
         long currentSecond = nowMs / 1000L;
         if (currentSecond > lastLogSecond) {
             long totalElapsed = (nowMs - startTimeMs) / 1000L;
-            log.info("Source task stats: elapsed={}s, sent_last_second={}, total_sent={}, mps_config={} message_size_bytes={}",
+            log.info("Load generator stats: elapsed={}s, sent_last_second={}, total_sent={}, mps_config={} message_size_bytes={}",
                 totalElapsed, eventsSentThisSecond, totalEventsSent, messagesPerSecond, messageSizeBytes);
             eventsSentThisSecond = 0;
             lastLogSecond = currentSecond;
@@ -153,16 +144,14 @@ public class MyFirstKafkaConnectorTask extends SourceTask {
     }
 
     private String sizedString(int size) {
-        if (size <= 0) {
-            return "";
-        }
+        if (size <= 0) return "";
         byte[] bytes = new byte[size];
         Arrays.fill(bytes, (byte) 'A');
         return new String(bytes, StandardCharsets.US_ASCII);
     }
 
     @Override
-    public void stop() {
-    }
-
+    public void stop() {}
 }
+
+

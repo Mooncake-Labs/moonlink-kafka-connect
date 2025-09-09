@@ -1,6 +1,6 @@
-package example.source;
+package example.loadgen;
 
-import static example.source.MyFirstKafkaConnectorConfig.*;
+import static example.loadgen.LoadGeneratorConnectorConfig.*;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -11,7 +11,6 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.kafka.clients.admin.KafkaAdminClient;
 import org.apache.kafka.common.config.Config;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigValue;
@@ -19,15 +18,14 @@ import org.apache.kafka.connect.connector.Task;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceConnector;
 import org.apache.kafka.connect.util.ConnectorUtils;
+import example.source.PropertiesUtil;
 
-@Deprecated
-public class MyFirstKafkaConnector extends SourceConnector {
+public class LoadGeneratorConnector extends SourceConnector {
 
-    private final Logger log = LoggerFactory.getLogger(MyFirstKafkaConnector.class);
+    private final Logger log = LoggerFactory.getLogger(LoadGeneratorConnector.class);
 
     private Map<String, String> originalProps;
-    private MyFirstKafkaConnectorConfig config;
-    // private NewPartitionsCheckerThread checker;
+    private LoadGeneratorConnectorConfig config;
 
     @Override
     public String version() {
@@ -41,7 +39,7 @@ public class MyFirstKafkaConnector extends SourceConnector {
 
     @Override
     public Class<? extends Task> taskClass() {
-        return MyFirstKafkaConnectorTask.class;
+        return LoadGeneratorTask.class;
     }
 
     @Override
@@ -81,20 +79,12 @@ public class MyFirstKafkaConnector extends SourceConnector {
     @Override
     public void start(Map<String, String> originalProps) {
         this.originalProps = originalProps;
-        config = new MyFirstKafkaConnectorConfig(originalProps);
-        // int monitorThreadTimeout = config.getInt(MONITOR_THREAD_TIMEOUT_CONFIG);
-        // checker = new NewPartitionsCheckerThread(context, monitorThreadTimeout);
-        // checker.start();
-        // create a topic
+        config = new LoadGeneratorConnectorConfig(originalProps);
     }
 
     @Override
     public List<Map<String, String>> taskConfigs(int maxTasks) {
         List<Map<String, String>> taskConfigs = new ArrayList<>();
-        // The partitions below represent the source's part that
-        // would likely to be broken down into tasks... such as
-        // tables in a database.
-        // List<String> partitions = checker.getCurrentSources();
         List<String> partitions = Arrays.asList("source-1", "source-2", "source-3");
         if (partitions.isEmpty()) {
             taskConfigs = Collections.emptyList();
@@ -112,8 +102,7 @@ public class MyFirstKafkaConnector extends SourceConnector {
     }
 
     @Override
-    public void stop() {
-        // checker.shutdown();
-    }
-
+    public void stop() {}
 }
+
+

@@ -10,14 +10,11 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.Task;
-import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkConnector;
 
 import static moonlink.sink.connector.MoonlinkSinkConnectorConfig.*;
 
-import moonlink.client.MoonlinkClient;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
+ 
 
 public class MoonlinkSinkConnector extends SinkConnector {
 
@@ -45,23 +42,7 @@ public class MoonlinkSinkConnector extends SinkConnector {
     public void start(Map<String, String> originalProps) {
         this.originalProps = originalProps;
         log.info("Moonlink Sink Connector started with properties: {}", originalProps);
-
-        try {
-            var cfg = new MoonlinkSinkConnectorConfig(originalProps);
-            String baseUrl = cfg.getString(MOONLINK_URI);
-            String database = cfg.getString(DATABASE_NAME);
-            String table = cfg.getString(TABLE_NAME);
-            var client = new MoonlinkClient(baseUrl);
-
-            // Fetch Arrow schema via IPC (primary) and also fetch JSON to pass via props
-            org.apache.arrow.vector.types.pojo.Schema arrowSchema = client.fetchArrowSchemaIpc(database, table);
-            String arrowSchemaJson = new ObjectMapper().writeValueAsString(arrowSchema);
-            this.originalProps = new HashMap<>(this.originalProps);
-            this.originalProps.put("arrow.schema.json", arrowSchemaJson);
-            log.info("Fetched Arrow schema JSON and stored for tasks");
-        } catch (Exception e) {
-            throw new ConnectException("Failed to fetch Moonlink table schema. Ensure the table exists in Moonlink before starting the sink connector.", e);
-        }
+        // No schema fetch needed; values are raw Avro bytes
     }
 
     @Override

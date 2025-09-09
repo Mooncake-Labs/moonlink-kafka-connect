@@ -5,8 +5,10 @@
         "tasks.max": "1",
         "topics": "source-1",
         "moonlink.uri": "http://moonlink:3030",
-        "moonlink.table.name": "test_table",
+        "moonlink.table.name": "test_table_13",
         "moonlink.database.name": "test_db",
-        "moonlink.json.schema": "[{\"name\":\"string-column\",\"data_type\":\"string\",\"nullable\":false},{\"name\":\"numeric-column\",\"data_type\":\"int32\",\"nullable\":false},{\"name\":\"boolean-column\",\"data_type\":\"boolean\",\"nullable\":true}]"
+        "schema.registry.url": "http://schema-registry:8081",
+        "key.converter": "org.apache.kafka.connect.converters.ByteArrayConverter",
+        "value.converter": "org.apache.kafka.connect.converters.ByteArrayConverter"
     }
 }

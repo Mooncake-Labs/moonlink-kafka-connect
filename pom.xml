@@ -6,8 +6,8 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>moonlink</groupId>
-    <artifactId>moonlink-source-connector</artifactId>
-    <description>Moonlink Source Connector</description>
+    <artifactId>moonlink-connectors</artifactId>
+    <description>Moonlink Connectors (Load Generator + Sink)</description>
     <version>1.0</version>
 
     <properties>
@@ -26,6 +26,12 @@
             <artifactId>connect-api</artifactId>
             <version>${connect.api.version}</version>
             <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>3.3.2</version>
         </dependency>
 
         <!-- Apache Arrow for schema serialization/deserialization -->
@@ -82,6 +88,21 @@
             <artifactId>protobuf-java</artifactId>
             <version>${protobuf.version}</version>
         </dependency>
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-connect-avro-converter</artifactId>
+            <version>7.3.3</version>
+        </dependency>
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-avro-serializer</artifactId>
+            <version>7.3.3</version>
+        </dependency>
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-schema-registry-client</artifactId>
+            <version>7.3.3</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -116,43 +137,82 @@
             </plugin>
 
             <!-- Build an uber JAR so Kafka Connect can load Arrow classes -->
+            <!-- Build two shaded jars: one with ONLY loadgen classes, one with ONLY sink classes -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
                 <version>3.5.0</version>
                 <executions>
+                    <!-- Load Generator Uber Jar -->
                     <execution>
+                        <id>shade-loadgen</id>
                         <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
+                        <goals><goal>shade</goal></goals>
                         <configuration>
-                            <createDependencyReducedPom>true</createDependencyReducedPom>
-                            <minimizeJar>false</minimizeJar>
+                            <shadedArtifactAttached>true</shadedArtifactAttached>
+                            <shadedClassifierName>loadgen</shadedClassifierName>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>
                                     <excludes>
-                                        <!-- Keep META-INF signatures out of shaded JAR -->
                                         <exclude>META-INF/*.SF</exclude>
                                         <exclude>META-INF/*.DSA</exclude>
                                         <exclude>META-INF/*.RSA</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
-                            <relocations>
-                                <!-- Avoid any potential classpath conflicts -->
-                                <relocation>
-                                    <pattern>com.fasterxml.jackson</pattern>
-                                    <shadedPattern>shaded.com.fasterxml.jackson</shadedPattern>
-                                </relocation>
-                            </relocations>
                             <artifactSet>
                                 <excludes>
-                                    <!-- Do not include Kafka Connect API which is provided by the worker -->
                                     <exclude>org.apache.kafka:connect-api</exclude>
                                 </excludes>
                             </artifactSet>
+                            <filters>
+                                <filter>
+                                    <artifact>${project.groupId}:${project.artifactId}</artifact>
+                                    <includes>
+                                        <include>example/loadgen/**</include>
+                                        <include>example/source/PropertiesUtil.class</include>
+                                        <include>my-first-kafka-connector.properties</include>
+                                    </includes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                    <!-- Sink Uber Jar -->
+                    <execution>
+                        <id>shade-sink</id>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <shadedArtifactAttached>true</shadedArtifactAttached>
+                            <shadedClassifierName>sink</shadedClassifierName>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <artifactSet>
+                                <excludes>
+                                    <exclude>org.apache.kafka:connect-api</exclude>
+                                </excludes>
+                            </artifactSet>
+                            <filters>
+                                <filter>
+                                    <artifact>${project.groupId}:${project.artifactId}</artifact>
+                                    <includes>
+                                        <include>moonlink/sink/connector/**</include>
+                                        <include>moonlink/client/**</include>
+                                        <include>moonlink-sink-connector.properties</include>
+                                    </includes>
+                                </filter>
+                            </filters>
                         </configuration>
                     </execution>
                 </executions>
@@ -178,4 +238,10 @@
         </plugins>
     </build>
 
+    <repositories>
+        <repository>
+            <id>confluent</id>
+            <url>https://packages.confluent.io/maven/</url>
+        </repository>
+    </repositories>
 </project>
