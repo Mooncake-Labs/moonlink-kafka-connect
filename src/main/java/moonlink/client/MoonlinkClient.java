@@ -26,7 +26,7 @@ public class MoonlinkClient {
 
     public MoonlinkClient(String baseUrl) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
-        this.http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(5)).build();
+        this.http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_2).connectTimeout(Duration.ofSeconds(5)).build();
         this.mapper = new ObjectMapper();
     }
 
@@ -83,11 +83,24 @@ public class MoonlinkClient {
         Dto.IngestProtobufRequest body = new Dto.IngestProtobufRequest();
         body.operation = "insert";
         body.data = serializedRowProto; // custom serializer writes as JSON array
-        body.requestMode = Dto.RequestMode.Async; // wait for lsn
+        body.requestMode = Dto.RequestMode.Sync; // wait for lsn
         String json = mapper.writeValueAsString(body);
         var req = HttpRequest.newBuilder(URI.create(baseUrl + "/ingestpb/" + srcTableName))
                 .POST(HttpRequest.BodyPublishers.ofString(json))
                 .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .build();
+                
+        var res = http.send(req, HttpResponse.BodyHandlers.ofString());
+        ensure2xx(res);
+        return mapper.readValue(res.body(), Dto.IngestResponse.class);
+    }
+
+    // New: raw Protobuf ingestion without JSON wrapper
+    public Dto.IngestResponse insertRowProtobufRaw(String srcTableName, byte[] serializedRowProto) throws Exception {
+        var req = HttpRequest.newBuilder(URI.create(baseUrl + "/ingestpb_raw/" + srcTableName))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(serializedRowProto))
+                .header("Content-Type", "application/octet-stream")
                 .header("Accept", "application/json")
                 .build();
         var res = http.send(req, HttpResponse.BodyHandlers.ofString());

@@ -2,7 +2,6 @@ package moonlink.sink.connector;
 
 import java.util.Collection;
 import java.util.Map;
-import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,10 +9,8 @@ import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.sink.SinkTask;
 
 import moonlink.client.MoonlinkClient;
-import moonlink.client.Dto;
 
 import org.apache.kafka.connect.errors.DataException;
-import org.apache.kafka.common.protocol.types.Struct;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.arrow.vector.types.pojo.Schema;
 import moonlink.client.MoonlinkRowConverter;
@@ -29,10 +26,11 @@ public class MoonlinkSinkTask extends SinkTask {
     private int sinkCompletedThisSecond;
     private long sinkTotalCompleted;
     private long latestLsn;
-    private long httpCallTimeTotalMs;
-    private long serializeTimeTotalMs;
+    private long httpCallTimeTotalNs;
+    private long serializeTimeTotalNs;
     private long httpCallCount;
     private long serializeCount;
+    private String taskId;
 
     private Schema arrowSchema;
 
@@ -64,10 +62,12 @@ public class MoonlinkSinkTask extends SinkTask {
             sinkCompletedThisSecond = 0;
             sinkTotalCompleted = 0L;
             latestLsn = 0L;
-            httpCallTimeTotalMs = 0L;
-            serializeTimeTotalMs = 0L;
+            httpCallTimeTotalNs = 0L;
+            serializeTimeTotalNs = 0L;
             httpCallCount = 0L;
             serializeCount = 0L;
+            // Try to capture the Kafka Connect task id if present
+            this.taskId = props.get("task.id");
         } catch (Exception e) {
             throw new ConnectException("Failed to initialize Moonlink client", e);
         }
@@ -77,6 +77,8 @@ public class MoonlinkSinkTask extends SinkTask {
     public void put(Collection<SinkRecord> records) {
         log.info("Moonlink Sink Task received {} records", records.size());
         long batchStartNs = System.nanoTime();
+        long batchHttpNsTotal = 0L;
+        long batchSerializeNsTotal = 0L;
         int processedThisBatch = 0;
         long batchMaxLsn = latestLsn;
         for (SinkRecord record : records) {
@@ -94,14 +96,17 @@ public class MoonlinkSinkTask extends SinkTask {
                 long serializeStartNs = System.nanoTime();
                 moonlink.Row.MoonlinkRow row = MoonlinkRowConverter.convert(value, arrowSchema).build();
                 byte[] serializedRow = row.toByteArray();
-                long serializeElapsedMs = (System.nanoTime() - serializeStartNs) / 1_000_000L;
-                serializeTimeTotalMs += serializeElapsedMs;
+                long serializeElapsedNs = (System.nanoTime() - serializeStartNs);
+                serializeTimeTotalNs += serializeElapsedNs;
+                batchSerializeNsTotal += serializeElapsedNs;
                 serializeCount++;
 
                 long httpStartNs = System.nanoTime();
+                // Use JSON-wrapped protobuf endpoint supported by service (/ingestpb)
                 var resp = client.insertRowProtobuf(srcTableName, serializedRow);
-                long httpElapsedMs = (System.nanoTime() - httpStartNs) / 1_000_000L;
-                httpCallTimeTotalMs += httpElapsedMs;
+                long httpElapsedNs = (System.nanoTime() - httpStartNs);
+                httpCallTimeTotalNs += httpElapsedNs;
+                batchHttpNsTotal += httpElapsedNs;
                 httpCallCount++;
                 Long respLsn = resp.lsn;
                 if (respLsn != null) {
@@ -117,12 +122,27 @@ public class MoonlinkSinkTask extends SinkTask {
             }
         }
         long batchElapsedNs = System.nanoTime() - batchStartNs;
-        long batchElapsedMs = batchElapsedNs / 1_000_000L;
-        double batchThroughputRps = processedThisBatch * 1000.0 / Math.max(1L, batchElapsedMs);
+        double batchElapsedMs = batchElapsedNs / 1_000_000.0;
+        double batchThroughputRps = processedThisBatch / Math.max(0.001, (batchElapsedNs / 1_000_000_000.0));
         long sinceStartMs = System.currentTimeMillis() - sinkStartTimeMs;
         double avgThroughputRps = sinkTotalCompleted * 1000.0 / Math.max(1L, sinceStartMs);
-        double avgHttpMs = httpCallCount > 0 ? (httpCallTimeTotalMs * 1.0 / httpCallCount) : 0.0;
-        double avgSerializeMs = serializeCount > 0 ? (serializeTimeTotalMs * 1.0 / serializeCount) : 0.0;
+        double avgHttpMs = httpCallCount > 0 ? ((httpCallTimeTotalNs / (double) httpCallCount) / 1_000_000.0) : 0.0;
+        double avgSerializeMs = serializeCount > 0 ? ((serializeTimeTotalNs / (double) serializeCount) / 1_000_000.0) : 0.0;
+        // Clean per-batch log (consumed by profiler)
+        log.info(
+            "Sink task batch: task_id={} processed={} elapsed_ms={} rps={} total_completed={} last_lsn={} http_ms_batch={} serialize_ms_batch={} avg_http_ms={} avg_serialize_ms={}",
+            taskId,
+            processedThisBatch,
+            String.format("%.3f", batchElapsedMs),
+            String.format("%.2f", batchThroughputRps),
+            sinkTotalCompleted,
+            batchMaxLsn,
+            String.format("%.3f", (batchHttpNsTotal / 1_000_000.0)),
+            String.format("%.3f", (batchSerializeNsTotal / 1_000_000.0)),
+            String.format("%.2f", avgHttpMs),
+            String.format("%.2f", avgSerializeMs)
+        );
+        // Legacy summary line (kept for compatibility)
         log.info(
             "Sink poll completed: processed={}, elapsed_ms={}, throughput_rps={}, total_completed={}, avg_throughput_rps={}, last_lsn={}, avg_http_ms={}, avg_serialize_ms={}",
             processedThisBatch,

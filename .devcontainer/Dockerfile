@@ -15,6 +15,7 @@ RUN cargo install cargo-deny cargo-sort
 
 USER root
 RUN apt-get update \
- && apt-get install -y openjdk-17-jdk maven \
+ && apt-get install -y default-jdk maven \
  && rm -rf /var/lib/apt/lists/*
+
 USER vscode
