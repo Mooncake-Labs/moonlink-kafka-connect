@@ -1,1 +1,0 @@
-cd /workspaces/moonlink-kafka-connect/moonlink && cargo run -p moonlink_datafusion /workspaces/moonlink-kafka-connect/moonlink-data/moonlink.sock

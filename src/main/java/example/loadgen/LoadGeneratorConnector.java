@@ -13,23 +13,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.kafka.common.config.Config;
 import org.apache.kafka.common.config.ConfigDef;
-import org.apache.kafka.common.config.ConfigValue;
 import org.apache.kafka.connect.connector.Task;
-import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceConnector;
 import org.apache.kafka.connect.util.ConnectorUtils;
-import example.source.PropertiesUtil;
 
 public class LoadGeneratorConnector extends SourceConnector {
 
     private final Logger log = LoggerFactory.getLogger(LoadGeneratorConnector.class);
 
     private Map<String, String> originalProps;
-    private LoadGeneratorConnectorConfig config;
 
     @Override
     public String version() {
-        return PropertiesUtil.getConnectorVersion();
+        return "1.0";
     }
 
     @Override
@@ -45,41 +41,13 @@ public class LoadGeneratorConnector extends SourceConnector {
     @Override
     public Config validate(Map<String, String> connectorConfigs) {
         Config config = super.validate(connectorConfigs);
-        List<ConfigValue> configValues = config.configValues();
-        String firstNonRequiredParamValue = null;
-        String secondNonRequiredParamValue = null;
-        boolean specialCircumstanceDetected = false;
-        for (ConfigValue configValue : configValues) {
-            if (configValue.value() != null) {
-                if (configValue.name().equals(FIRST_NONREQUIRED_PARAM_CONFIG)) {
-                    firstNonRequiredParamValue = (String) configValue.value();
-                }
-                if (configValue.name().equals(SECOND_NONREQUIRED_PARAM_CONFIG)) {
-                    secondNonRequiredParamValue = (String) configValue.value();
-                }
-            }
-            if (firstNonRequiredParamValue != null &&
-                secondNonRequiredParamValue != null &&
-                firstNonRequiredParamValue.equals(secondNonRequiredParamValue)) {
-                specialCircumstanceDetected = true;
-                break;
-            }
-        }
-        if (specialCircumstanceDetected) {
-            throw new ConnectException(String.format(
-                "A special circumstance has been found in the "
-                + "connector configuration. The value of the "
-                + "properties '%s' or '%s' cannot be the same.",
-                FIRST_NONREQUIRED_PARAM_CONFIG,
-                SECOND_NONREQUIRED_PARAM_CONFIG));
-        }
+
         return config;
     }
 
     @Override
     public void start(Map<String, String> originalProps) {
         this.originalProps = originalProps;
-        config = new LoadGeneratorConnectorConfig(originalProps);
     }
 
     @Override

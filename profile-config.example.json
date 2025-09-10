@@ -1,12 +1,14 @@
 {
   "remote": {
-    "moonlink_uri": "http://ec2-<ip-address>.compute-1.amazonaws.com:3030"
+    "moonlink_uri": "http://ec2-<ip-address>.compute-1.amazonaws.com:3030",
+    "schema_registry_url": "http://172.31.39.39:8081"
   },
   "source": {
     "connector_name": "example-source-connector",
     "tasks_max": 1,
     "messages_per_second": 10,
     "message_size_bytes": 200,
+    "run_indefinitely": false,
     "max_duration_seconds": 60,
     "output_topic": "source-1"
   },

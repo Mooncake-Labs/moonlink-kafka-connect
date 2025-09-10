@@ -14,8 +14,6 @@ import org.apache.kafka.connect.sink.SinkConnector;
 
 import static moonlink.sink.connector.MoonlinkSinkConnectorConfig.*;
 
- 
-
 public class MoonlinkSinkConnector extends SinkConnector {
 
     private final Logger log = LoggerFactory.getLogger(MoonlinkSinkConnector.class);
@@ -24,7 +22,7 @@ public class MoonlinkSinkConnector extends SinkConnector {
 
     @Override
     public String version() {
-        return PropertiesUtil.getConnectorVersion();
+        return "1.0";
     }
 
     @Override

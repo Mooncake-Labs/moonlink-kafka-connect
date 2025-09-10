@@ -1,16 +1,13 @@
 {
     "name": "example-source-connector",
     "config": {
-        "connector.class": "example.loadgen.LoadGeneratorConnector",X
-        "first.required.param": "Kafka",
-        "second.required.param": "Connect",
+        "connector.class": "example.loadgen.LoadGeneratorConnector",
         "tasks.max": "1",
         "task.messages.per.second": "60",
         "message.size.bytes": "200",
         "task.max.duration.seconds": "10",
         "output.topic": "source-1",
-        "key.converter": "io.confluent.connect.avro.AvroConverter",
-        "key.converter.schema.registry.url": "http://schema-registry:8081",
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
         "value.converter": "io.confluent.connect.avro.AvroConverter",
         "value.converter.schema.registry.url": "http://schema-registry:8081"
     }

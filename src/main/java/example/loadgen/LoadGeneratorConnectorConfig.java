@@ -13,20 +13,6 @@ public class LoadGeneratorConnectorConfig extends AbstractConfig {
         super(CONFIG_DEF, originalProps);
     }
 
-    public static final String FIRST_REQUIRED_PARAM_CONFIG = "first.required.param";
-    private static final String FIRST_REQUIRED_PARAM_DOC = "This is the 1st required parameter";
-
-    public static final String SECOND_REQUIRED_PARAM_CONFIG = "second.required.param";
-    private static final String SECOND_REQUIRED_PARAM_DOC = "This is the 2nd required parameter";
-
-    public static final String FIRST_NONREQUIRED_PARAM_CONFIG = "first.nonrequired.param";
-    private static final String FIRST_NONREQUIRED_PARAM_DOC = "This is the 1st non-required parameter";
-    private static final String FIRST_NONREQUIRED_PARAM_DEFAULT = "foo";
-
-    public static final String SECOND_NONREQUIRED_PARAM_CONFIG = "second.nonrequired.param";
-    private static final String SECOND_NONREQUIRED_PARAM_DOC = "This is the 2nd non-required parameter";
-    private static final String SECOND_NONREQUIRED_PARAM_DEFAULT = "bar";
-
     public static final String TASK_MESSAGES_PER_SECOND_CONFIG = "task.messages.per.second";
     private static final String TASK_MESSAGES_PER_SECOND_DOC = "Number of messages the task emits per second";
     private static final int TASK_MESSAGES_PER_SECOND_DEFAULT = 1;
@@ -34,6 +20,11 @@ public class LoadGeneratorConnectorConfig extends AbstractConfig {
     public static final String MESSAGE_SIZE_BYTES_CONFIG = "message.size.bytes";
     private static final String MESSAGE_SIZE_BYTES_DOC = "Approximate size of generated message payload in bytes";
     private static final int MESSAGE_SIZE_BYTES_DEFAULT = 100;
+
+    // If true, ignore any max duration/samples and keep generating until the task is stopped
+    public static final String TASK_RUN_INDEFINITELY_CONFIG = "task.run.indefinitely";
+    private static final String TASK_RUN_INDEFINITELY_DOC = "If true, ignore max duration/samples and produce indefinitely until stopped";
+    private static final boolean TASK_RUN_INDEFINITELY_DEFAULT = false;
 
     // Maximum duration for which a task should emit events (seconds). 0 or negative = unlimited
     public static final String TASK_MAX_DURATION_SECONDS_CONFIG = "task.max.duration.seconds";
@@ -59,28 +50,6 @@ public class LoadGeneratorConnectorConfig extends AbstractConfig {
 
     private static void addParams(final ConfigDef configDef) {
         configDef.define(
-            FIRST_REQUIRED_PARAM_CONFIG,
-            Type.STRING,
-            Importance.HIGH,
-            FIRST_REQUIRED_PARAM_DOC)
-        .define(
-            SECOND_REQUIRED_PARAM_CONFIG,
-            Type.STRING,
-            Importance.HIGH,
-            SECOND_REQUIRED_PARAM_DOC)
-        .define(
-            FIRST_NONREQUIRED_PARAM_CONFIG,
-            Type.STRING,
-            FIRST_NONREQUIRED_PARAM_DEFAULT,
-            Importance.HIGH,
-            FIRST_NONREQUIRED_PARAM_DOC)
-        .define(
-            SECOND_NONREQUIRED_PARAM_CONFIG,
-            Type.STRING,
-            SECOND_NONREQUIRED_PARAM_DEFAULT,
-            Importance.HIGH,
-            SECOND_NONREQUIRED_PARAM_DOC)
-        .define(
             TASK_MESSAGES_PER_SECOND_CONFIG,
             Type.INT,
             TASK_MESSAGES_PER_SECOND_DEFAULT,
@@ -92,6 +61,12 @@ public class LoadGeneratorConnectorConfig extends AbstractConfig {
             MESSAGE_SIZE_BYTES_DEFAULT,
             Importance.HIGH,
             MESSAGE_SIZE_BYTES_DOC)
+        .define(
+            TASK_RUN_INDEFINITELY_CONFIG,
+            Type.BOOLEAN,
+            TASK_RUN_INDEFINITELY_DEFAULT,
+            Importance.MEDIUM,
+            TASK_RUN_INDEFINITELY_DOC)
         .define(
             TASK_MAX_DURATION_SECONDS_CONFIG,
             Type.INT,

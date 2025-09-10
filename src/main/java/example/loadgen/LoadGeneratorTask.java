@@ -17,7 +17,6 @@ import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
-import example.source.PropertiesUtil;
 
 public class LoadGeneratorTask extends SourceTask {
 
@@ -43,10 +42,11 @@ public class LoadGeneratorTask extends SourceTask {
     private static final java.util.Map<String, String> SOURCE_PARTITION = java.util.Collections.singletonMap("source", "source-1");
     private String outputTopic;
     private Schema recordSchema;
+    private boolean runIndefinitely;
 
     @Override
     public String version() {
-        return PropertiesUtil.getConnectorVersion();
+        return "1.0";
     }
 
     @Override
@@ -62,8 +62,9 @@ public class LoadGeneratorTask extends SourceTask {
         lastLogSecond = startTimeMs / 1000L;
         eventsSentThisSecond = 0;
         totalEventsSent = 0L;
+        runIndefinitely = config.getBoolean(TASK_RUN_INDEFINITELY_CONFIG);
         maxDurationSeconds = config.getInt(TASK_MAX_DURATION_SECONDS_CONFIG);
-        if (maxDurationSeconds > 0 && messagesPerSecond > 0) {
+        if (!runIndefinitely && maxDurationSeconds > 0 && messagesPerSecond > 0) {
             maxMessagesToSend = (long) messagesPerSecond * (long) maxDurationSeconds;
         } else {
             maxMessagesToSend = 0L; // unlimited

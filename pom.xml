@@ -16,7 +16,6 @@
         <testcontainers.version>1.17.6</testcontainers.version>
         <maven.compiler.plugin>3.10.1</maven.compiler.plugin>
         <jackson.version>2.17.1</jackson.version>
-        <protobuf.version>3.25.3</protobuf.version>
         <arrow.version>15.0.2</arrow.version>
     </properties>
 
@@ -82,12 +81,6 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- Protobuf runtime for generated classes -->
-        <dependency>
-            <groupId>com.google.protobuf</groupId>
-            <artifactId>protobuf-java</artifactId>
-            <version>${protobuf.version}</version>
-        </dependency>
         <dependency>
             <groupId>io.confluent</groupId>
             <artifactId>kafka-connect-avro-converter</artifactId>
@@ -152,6 +145,11 @@
                             <shadedArtifactAttached>true</shadedArtifactAttached>
                             <shadedClassifierName>loadgen</shadedClassifierName>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <artifactSet>
+                                <excludes>
+                                    <exclude>org.apache.kafka:connect-api</exclude>
+                                </excludes>
+                            </artifactSet>
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>
@@ -161,19 +159,10 @@
                                         <exclude>META-INF/*.RSA</exclude>
                                     </excludes>
                                 </filter>
-                            </filters>
-                            <artifactSet>
-                                <excludes>
-                                    <exclude>org.apache.kafka:connect-api</exclude>
-                                </excludes>
-                            </artifactSet>
-                            <filters>
                                 <filter>
                                     <artifact>${project.groupId}:${project.artifactId}</artifact>
                                     <includes>
                                         <include>example/loadgen/**</include>
-                                        <include>example/source/PropertiesUtil.class</include>
-                                        <include>my-first-kafka-connector.properties</include>
                                     </includes>
                                 </filter>
                             </filters>
@@ -188,6 +177,11 @@
                             <shadedArtifactAttached>true</shadedArtifactAttached>
                             <shadedClassifierName>sink</shadedClassifierName>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <artifactSet>
+                                <excludes>
+                                    <exclude>org.apache.kafka:connect-api</exclude>
+                                </excludes>
+                            </artifactSet>
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>
@@ -197,19 +191,11 @@
                                         <exclude>META-INF/*.RSA</exclude>
                                     </excludes>
                                 </filter>
-                            </filters>
-                            <artifactSet>
-                                <excludes>
-                                    <exclude>org.apache.kafka:connect-api</exclude>
-                                </excludes>
-                            </artifactSet>
-                            <filters>
                                 <filter>
                                     <artifact>${project.groupId}:${project.artifactId}</artifact>
                                     <includes>
                                         <include>moonlink/sink/connector/**</include>
                                         <include>moonlink/client/**</include>
-                                        <include>moonlink-sink-connector.properties</include>
                                     </includes>
                                 </filter>
                             </filters>
@@ -218,23 +204,6 @@
                 </executions>
             </plugin>
 
-            <!-- Compile moonlink row protobuf into Java sources -->
-            <plugin>
-                <groupId>org.xolstice.maven.plugins</groupId>
-                <artifactId>protobuf-maven-plugin</artifactId>
-                <version>0.6.1</version>
-                <configuration>
-                    <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
-                    <protoSourceRoot>${project.basedir}/moonlink/src/moonlink_proto/proto</protoSourceRoot>
-                </configuration>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
         </plugins>
     </build>
 

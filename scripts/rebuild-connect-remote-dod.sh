@@ -20,6 +20,7 @@ if [[ -n "${CONFIG_PATH}" ]]; then
   SOURCE_MSGS_PER_SEC=$(jq -r '.source.messages_per_second' "${CONFIG_PATH}")
   SOURCE_MSG_SIZE_BYTES=$(jq -r '.source.message_size_bytes' "${CONFIG_PATH}")
   SOURCE_MAX_DURATION=$(jq -r '.source.max_duration_seconds' "${CONFIG_PATH}")
+  SOURCE_RUN_INDEFINITELY=$(jq -r '.source.run_indefinitely // false' "${CONFIG_PATH}")
   SOURCE_TOPIC=$(jq -r '.source.output_topic' "${CONFIG_PATH}")
   SINK_TASKS_MAX=$(jq -r '.sink.tasks_max' "${CONFIG_PATH}")
   SCHEMA_JSON_COMPACT=$(jq -c '.table.schema' "${CONFIG_PATH}")
@@ -70,6 +71,7 @@ SOURCE_TASKS_MAX="${SOURCE_TASKS_MAX:-1}"
 SOURCE_MSGS_PER_SEC="${SOURCE_MSGS_PER_SEC:-60}"
 SOURCE_MSG_SIZE_BYTES="${SOURCE_MSG_SIZE_BYTES:-200}"
 SOURCE_MAX_DURATION="${SOURCE_MAX_DURATION:-10}"
+SOURCE_RUN_INDEFINITELY="${SOURCE_RUN_INDEFINITELY:-false}"
 SOURCE_TOPIC="${SOURCE_TOPIC:-source-1}"
 SINK_TASKS_MAX="${SINK_TASKS_MAX:-1}"
 RECREATE="${RECREATE:-true}"
@@ -292,6 +294,7 @@ SOURCE_PAYLOAD=$(jq -n \
   --arg mps "${SOURCE_MSGS_PER_SEC}" \
   --arg size "${SOURCE_MSG_SIZE_BYTES}" \
   --arg dur "${SOURCE_MAX_DURATION}" \
+  --arg run "${SOURCE_RUN_INDEFINITELY}" \
   --arg topic "${SOURCE_TOPIC}" \
   '{name: $name, config: {
     "connector.class": "example.source.MyFirstKafkaConnector",
@@ -301,9 +304,9 @@ SOURCE_PAYLOAD=$(jq -n \
     "task.messages.per.second": $mps,
     "message.size.bytes": $size,
     "task.max.duration.seconds": $dur,
+    "task.run.indefinitely": $run,
     "output.topic": $topic,
-    "key.converter": "io.confluent.connect.avro.AvroConverter",
-    "key.converter.schema.registry.url": "http://schema-registry:8081",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
     "value.converter": "io.confluent.connect.avro.AvroConverter",
     "value.converter.schema.registry.url": "http://schema-registry:8081"
   }}')
@@ -328,7 +331,7 @@ SINK_PAYLOAD=$(jq -n \
     "moonlink.table.name": $tbl,
     "moonlink.database.name": $db,
     "schema.registry.url": $sr,
-    "key.converter": "org.apache.kafka.connect.converters.ByteArrayConverter",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
     "value.converter": "org.apache.kafka.connect.converters.ByteArrayConverter"
   }}')
 echo "SINK connector payload:"; echo "${SINK_PAYLOAD}" | (command -v jq >/dev/null 2>&1 && jq -C . || cat)

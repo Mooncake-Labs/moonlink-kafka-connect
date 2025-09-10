@@ -5,3 +5,7 @@ moonlink-data
 dependency-reduced-pom.xml
 RUN_INSTRUCTIONS.md
 profile-config.json
+build/msk-plugin
+build/*.zip
+.tools
+.mvn_tmp
