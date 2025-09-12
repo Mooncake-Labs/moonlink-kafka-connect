@@ -1,5 +1,5 @@
 ## Apache Kafka Connector for Moonlink
-This is the testbed for building a Kafka Connector into [moonlink](https://github.com/Mooncake-Labs/moonlink). This is adapted from AWS' kafka connector demo.
+This repository is a fork of [AWS's Building Apache Kafka Connectors](https://github.com/build-on-aws/building-apache-kafka-connectors). It adapts the example to integrate with [Moonlink](https://github.com/Mooncake-Labs/moonlink).
 
 ### Requirements
 
@@ -251,4 +251,4 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 
 ## License
 
-This project is licensed under the MIT-0 License. See the [LICENSE](./LICENSE) file.
+This project is licensed under the MIT No Attribution License (MIT-0), consistent with the upstream AWS repository. See the [LICENSE](./LICENSE) file for details.
