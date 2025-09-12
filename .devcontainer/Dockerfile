@@ -19,3 +19,11 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 USER vscode
+
+# Preinstall DuckDB CLI for all sessions
+RUN curl -fsSL https://install.duckdb.org | sh
+
+USER root
+RUN ln -sf /home/vscode/.duckdb/cli/latest/duckdb /usr/local/bin/duckdb
+
+USER vscode

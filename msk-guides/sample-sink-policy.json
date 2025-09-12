@@ -1,0 +1,37 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ClusterConnect",
+      "Effect": "Allow",
+      "Action": ["kafka-cluster:Connect", "kafka-cluster:DescribeCluster"],
+      "Resource": ["<YOUR_CLUSTER_ARN>"]
+    },
+    {
+      "Sid": "ReadFromDataTopics",
+      "Effect": "Allow",
+      "Action": ["kafka-cluster:DescribeTopic", "kafka-cluster:ReadData"],
+      "Resource": ["<YOUR_CLUSTER_ARN>/*"]
+    },
+    {
+      "Sid": "ConnectInternalTopics",
+      "Effect": "Allow",
+      "Action": [
+        "kafka-cluster:DescribeTopic",
+        "kafka-cluster:ReadData",
+        "kafka-cluster:WriteData",
+        "kafka-cluster:CreateTopic"
+      ],
+      "Resource": ["<YOUR_CLUSTER_ARN>/__amazon_msk_connect_*"]
+    },
+    {
+      "Sid": "ConsumerGroups",
+      "Effect": "Allow",
+      "Action": ["kafka-cluster:DescribeGroup", "kafka-cluster:AlterGroup"],
+      "Resource": [
+        "<YOUR_CLUSTER_ARN>/connect-*",
+        "<YOUR_CLUSTER_ARN>/my-sink-*"
+      ]
+    }
+  ]
+}

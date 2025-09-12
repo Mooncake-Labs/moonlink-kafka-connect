@@ -3,7 +3,7 @@
   "config": {
     "connector.class": "example.loadgen.LoadGeneratorConnector",
     "tasks.max": "1",
-    "task.messages.per.second": "100",
+    "task.messages.per.second": "20",
     "message.size.bytes": "20",
     "task.max.duration.seconds": "20",
     "task.run.indefinitely": "false",

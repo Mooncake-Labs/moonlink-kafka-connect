@@ -4,20 +4,19 @@ set -euo pipefail
 # Build shaded JARs (loadgen + sink), package MSK plugin ZIPs, generate connector configs, and optionally upload to S3.
 #
 # Usage:
-#   scripts/build-and-upload-msk-plugin.sh [--no-upload]
+#   scripts/build-and-upload-msk-plugin.sh [config.json] [--no-upload]
 #
 # Requirements:
 #   - Java 11+, Maven
 #   - jq (for reading profile-config.json)
 #   - awscli (if uploading)
 #
-# Reads:
-#   profile-config.json for:
-#     - remote.moonlink_uri
-#     - source.*
-#     - sink.tasks_max
-#     - table.{database,name}
-#     - table.storage.s3.{bucket,region,access_key_id,secret_access_key}
+# Reads profile-config (new schema) from the provided file (default: profile-config.json):
+#   - uris.{moonlink,schema_registry}
+#   - source.*
+#   - sink.tasks_max
+#   - table.{database,name}
+#   - artifacts.s3.{bucket,region,access_key_id,secret_access_key,prefix}
 #
 # Outputs:
 #   - target/<artifactId>-<version>-loadgen.jar
@@ -31,47 +30,54 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
 
 NO_UPLOAD=false
-if [[ "${1:-}" == "--no-upload" ]]; then
-  NO_UPLOAD=true
+CONFIG_PATH=""
+for arg in "$@"; do
+  case "$arg" in
+    --no-upload) NO_UPLOAD=true ;;
+    *) if [[ -z "$CONFIG_PATH" ]]; then CONFIG_PATH="$arg"; fi ;;
+  esac
+done
+
+if [[ -z "$CONFIG_PATH" ]]; then
+  CONFIG_PATH="${CONFIG:-$ROOT_DIR/profile-config.json}"
 fi
 
-PROFILE_JSON="$ROOT_DIR/profile-config.json"
-if [[ ! -f "$PROFILE_JSON" ]]; then
-  echo "profile-config.json not found at $PROFILE_JSON" >&2
+if [[ ! -f "$CONFIG_PATH" ]]; then
+  echo "Config file not found: $CONFIG_PATH" >&2
   exit 1
 fi
 
-# Extract settings from profile-config.json
-MOONLINK_URI=$(jq -r .remote.moonlink_uri "$PROFILE_JSON")
-SRC_NAME=$(jq -r .source.connector_name "$PROFILE_JSON")
-SRC_TASKS=$(jq -r .source.tasks_max "$PROFILE_JSON")
-SRC_MPS=$(jq -r .source.messages_per_second "$PROFILE_JSON")
-SRC_MSG_SIZE=$(jq -r .source.message_size_bytes "$PROFILE_JSON")
-SRC_RUN_INDEFINITE=$(jq -r '.source.run_indefinitely // false' "$PROFILE_JSON")
-SRC_MAX_SECS=$(jq -r .source.max_duration_seconds "$PROFILE_JSON")
-SRC_TOPIC=$(jq -r .source.output_topic "$PROFILE_JSON")
-SINK_NAME=$(jq -r .sink.connector_name "$PROFILE_JSON")
-SINK_TASKS=$(jq -r .sink.tasks_max "$PROFILE_JSON")
-DB_NAME=$(jq -r .table.database "$PROFILE_JSON")
-TABLE_NAME=$(jq -r .table.name "$PROFILE_JSON")
-S3_BUCKET=$(jq -r .table.storage.s3.bucket "$PROFILE_JSON")
-S3_REGION=$(jq -r .table.storage.s3.region "$PROFILE_JSON")
-AWS_ACCESS_KEY_ID_VAL=$(jq -r .table.storage.s3.access_key_id "$PROFILE_JSON")
-AWS_SECRET_ACCESS_KEY_VAL=$(jq -r .table.storage.s3.secret_access_key "$PROFILE_JSON")
+# Extract settings from config (new schema)
+MOONLINK_URI=$(jq -r .uris.moonlink "$CONFIG_PATH")
+SRC_NAME=$(jq -r .source.connector_name "$CONFIG_PATH")
+SRC_TASKS=$(jq -r .source.tasks_max "$CONFIG_PATH")
+SRC_MPS=$(jq -r .source.messages_per_second "$CONFIG_PATH")
+SRC_MSG_SIZE=$(jq -r .source.message_size_bytes "$CONFIG_PATH")
+SRC_RUN_INDEFINITE=$(jq -r '.source.run_indefinitely // false' "$CONFIG_PATH")
+SRC_MAX_SECS=$(jq -r .source.max_duration_seconds "$CONFIG_PATH")
+SRC_TOPIC=$(jq -r .source.output_topic "$CONFIG_PATH")
+SINK_NAME=$(jq -r .sink.connector_name "$CONFIG_PATH")
+SINK_TASKS=$(jq -r .sink.tasks_max "$CONFIG_PATH")
+DB_NAME=$(jq -r .table.database "$CONFIG_PATH")
+TABLE_NAME=$(jq -r .table.name "$CONFIG_PATH")
+
+# Schema Registry URL
+SCHEMA_REGISTRY_URL=$(jq -r .uris.schema_registry "$CONFIG_PATH")
+
+# Artifacts upload S3 config
+ARTIFACTS_BUCKET=$(jq -r '.artifacts.s3.bucket // empty' "$CONFIG_PATH")
+ARTIFACTS_REGION=$(jq -r '.artifacts.s3.region // empty' "$CONFIG_PATH")
+ARTIFACTS_ACCESS_KEY_ID=$(jq -r '.artifacts.s3.access_key_id // empty' "$CONFIG_PATH")
+ARTIFACTS_SECRET_ACCESS_KEY=$(jq -r '.artifacts.s3.secret_access_key // empty' "$CONFIG_PATH")
+ARTIFACTS_PREFIX_RAW=$(jq -r '.artifacts.s3.prefix // "msk-plugins/"' "$CONFIG_PATH")
 
 if [[ -z "$MOONLINK_URI" || "$MOONLINK_URI" == "null" ]]; then
-  echo "remote.moonlink_uri missing in profile-config.json" >&2
+  echo "uris.moonlink missing in config" >&2
   exit 1
 fi
-
-# Schema Registry: read from profile-config.json, allow env override, fallback to example default
-PROFILE_SR_URL=$(jq -r .remote.schema_registry_url "$PROFILE_JSON" 2>/dev/null || echo "null")
-if [[ -z "${SCHEMA_REGISTRY_URL:-}" ]]; then
-  if [[ -n "$PROFILE_SR_URL" && "$PROFILE_SR_URL" != "null" ]]; then
-    SCHEMA_REGISTRY_URL="$PROFILE_SR_URL"
-  else
-    SCHEMA_REGISTRY_URL="http://172.31.39.39:8081"
-  fi
+if [[ -z "$SCHEMA_REGISTRY_URL" || "$SCHEMA_REGISTRY_URL" == "null" ]]; then
+  echo "uris.schema_registry missing in config" >&2
+  exit 1
 fi
 
 # 1) Build shaded JARs
@@ -155,19 +161,25 @@ cat > "$CONFIG_DIR/sink-connector.msk.json" <<SINKJSON
 }
 SINKJSON
 
-# 4) Optional upload to S3
+# 4) Optional upload to S3 (artifacts.s3)
 if [[ "$NO_UPLOAD" == false ]]; then
   if ! command -v aws >/dev/null 2>&1; then
     echo "aws CLI not found; attempting to install (Debian/Ubuntu)..." >&2
     sudo apt-get update -y && sudo apt-get install -y awscli
   fi
-  export AWS_DEFAULT_REGION="$S3_REGION"
-  export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID_VAL"
-  export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY_VAL"
-  aws s3 cp "$LOADGEN_ZIP" "s3://$S3_BUCKET/msk-plugins/$(basename "$LOADGEN_ZIP")" --only-show-errors
-  aws s3 cp "$SINK_ZIP" "s3://$S3_BUCKET/msk-plugins/$(basename "$SINK_ZIP")" --only-show-errors
-  echo "Uploaded: s3://$S3_BUCKET/msk-plugins/$(basename "$LOADGEN_ZIP")"
-  echo "Uploaded: s3://$S3_BUCKET/msk-plugins/$(basename "$SINK_ZIP")"
+  if [[ -z "$ARTIFACTS_BUCKET" || -z "$ARTIFACTS_REGION" || -z "$ARTIFACTS_ACCESS_KEY_ID" || -z "$ARTIFACTS_SECRET_ACCESS_KEY" ]]; then
+    echo "artifacts.s3 configuration is required for upload but is missing." >&2
+    exit 1
+  fi
+  export AWS_DEFAULT_REGION="$ARTIFACTS_REGION"
+  export AWS_ACCESS_KEY_ID="$ARTIFACTS_ACCESS_KEY_ID"
+  export AWS_SECRET_ACCESS_KEY="$ARTIFACTS_SECRET_ACCESS_KEY"
+  PREFIX_TRIMMED="${ARTIFACTS_PREFIX_RAW%/}"
+  if [[ -z "$PREFIX_TRIMMED" ]]; then PREFIX_TRIMMED="msk-plugins"; fi
+  aws s3 cp "$LOADGEN_ZIP" "s3://$ARTIFACTS_BUCKET/${PREFIX_TRIMMED}/$(basename "$LOADGEN_ZIP")" --only-show-errors
+  aws s3 cp "$SINK_ZIP" "s3://$ARTIFACTS_BUCKET/${PREFIX_TRIMMED}/$(basename "$SINK_ZIP")" --only-show-errors
+  echo "Uploaded: s3://$ARTIFACTS_BUCKET/${PREFIX_TRIMMED}/$(basename "$LOADGEN_ZIP")"
+  echo "Uploaded: s3://$ARTIFACTS_BUCKET/${PREFIX_TRIMMED}/$(basename "$SINK_ZIP")"
 else
   echo "Skipping upload (--no-upload). Artifacts at:"
   echo "  $LOADGEN_ZIP"

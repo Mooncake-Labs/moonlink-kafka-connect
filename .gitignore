@@ -9,3 +9,6 @@ build/msk-plugin
 build/*.zip
 .tools
 .mvn_tmp
+client.properties
+*.log
+.connect-plugins

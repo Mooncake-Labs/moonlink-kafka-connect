@@ -29,6 +29,7 @@ public class MoonlinkSinkTask extends SinkTask {
     private MoonlinkClient client;
     private long latestLsn;
     private String taskId;
+    private long totalProcessed;
 
     private String schemaRegistryUrl;
     private Set<Integer> seenSchemaIds;
@@ -48,6 +49,7 @@ public class MoonlinkSinkTask extends SinkTask {
             schemaRegistryUrl = config.getString(MoonlinkSinkConnectorConfig.SCHEMA_REGISTRY_URL);
             seenSchemaIds = new HashSet<>();
             latestLsn = 0L;
+            totalProcessed = 0L;
             // Try to capture the Kafka Connect task id if present
             this.taskId = props.get("task.id");
         } catch (Exception e) {
@@ -89,10 +91,12 @@ public class MoonlinkSinkTask extends SinkTask {
 
                 var resp = client.insertRowAvroRaw(srcTableName, avroDatum);
                 Long respLsn = resp.lsn;
-                if (respLsn != null) {
-                    if (respLsn > batchMaxLsn) batchMaxLsn = respLsn;
-                    if (respLsn > latestLsn) latestLsn = respLsn;
+                if (respLsn == null) {
+                    throw new DataException("Insert row Avro raw response missing lsn");
                 }
+                if (respLsn > batchMaxLsn) batchMaxLsn = respLsn;
+                if (respLsn > latestLsn) latestLsn = respLsn;
+                
                 log.debug("Inserted row, lsn={}", respLsn);
                 processedThisBatch++;
             } catch (Exception e) {
@@ -102,10 +106,12 @@ public class MoonlinkSinkTask extends SinkTask {
         long batchElapsedNs = System.nanoTime() - batchStartNs;
         double batchElapsedMs = batchElapsedNs / 1_000_000.0;
         double batchThroughputRps = processedThisBatch / Math.max(0.001, (batchElapsedNs / 1_000_000_000.0));
+        totalProcessed += processedThisBatch;
         log.info(
-            "Sink task batch: task_id={} processed={} elapsed_ms={} rps={} last_lsn={}",
+            "Sink task batch: task_id={} processed={} total_completed={} elapsed_ms={} rps={} last_lsn={}",
             taskId,
             processedThisBatch,
+            totalProcessed,
             String.format("%.3f", batchElapsedMs),
             String.format("%.2f", batchThroughputRps),
             batchMaxLsn
